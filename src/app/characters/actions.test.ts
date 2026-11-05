@@ -12,15 +12,28 @@ vi.mock("next/cache", () => ({
 vi.mock("@/lib/characters", () => ({
   createCharacter: vi.fn(),
   deleteCharacter: vi.fn(),
+  getCharacterById: vi.fn(),
+  updateCharacter: vi.fn(),
 }));
 
 import { getServerSession } from "next-auth";
-import { createCharacter, deleteCharacter } from "@/lib/characters";
-import { createCharacterAction, deleteCharacterAction } from "./actions";
+import {
+  createCharacter,
+  deleteCharacter,
+  getCharacterById,
+  updateCharacter,
+} from "@/lib/characters";
+import {
+  createCharacterAction,
+  deleteCharacterAction,
+  updateCharacterAction,
+} from "./actions";
 
 const mockedGetServerSession = vi.mocked(getServerSession);
 const mockedCreateCharacter = vi.mocked(createCharacter);
 const mockedDeleteCharacter = vi.mocked(deleteCharacter);
+const mockedGetCharacterById = vi.mocked(getCharacterById);
+const mockedUpdateCharacter = vi.mocked(updateCharacter);
 
 describe("createCharacterAction", () => {
   beforeEach(() => {
@@ -95,6 +108,127 @@ describe("createCharacterAction", () => {
 
     expect(result.success).toBe(true);
     expect(result.characterId).toBe(characterId.toString());
+  });
+});
+
+describe("updateCharacterAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns error if user is not authenticated", async () => {
+    mockedGetServerSession.mockResolvedValue(null);
+    const formData = new FormData();
+    const result = await updateCharacterAction("abc", {}, formData);
+    expect(result.error).toBe("You must be signed in to edit a character.");
+  });
+
+  it("rejects editing a character owned by someone else", async () => {
+    const userId = new ObjectId().toString();
+    const ownerId = new ObjectId();
+
+    mockedGetServerSession.mockResolvedValue({
+      user: { id: userId },
+      expires: "1",
+    });
+
+    mockedGetCharacterById.mockResolvedValue({
+      _id: new ObjectId(),
+      userId: ownerId,
+      name: "Elina",
+      avatarUrl: null,
+      height: null,
+      age: "23",
+      gender: "Female",
+      occupation: "Alchemist",
+      tags: ["Fantasy"],
+      profile: "Profile",
+      greeting: "Hi",
+      background: null,
+      visibility: "public",
+      copyrightConfirmed: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const formData = new FormData();
+    formData.set("name", "Elina");
+    formData.set("age", "23");
+    formData.set("gender", "Female");
+    formData.set("occupation", "Alchemist");
+    formData.set("tags", "Fantasy");
+    formData.set("profile", "Profile");
+    formData.set("greeting", "Hi");
+    formData.set("visibility", "public");
+    formData.set("copyrightConfirmed", "on");
+
+    const result = await updateCharacterAction("abc", {}, formData);
+    expect(result.error).toBe("You do not have permission to edit this character.");
+  });
+
+  it("updates character when valid and user is owner", async () => {
+    const userId = new ObjectId();
+    const characterId = new ObjectId();
+
+    mockedGetServerSession.mockResolvedValue({
+      user: { id: userId.toString() },
+      expires: "1",
+    });
+
+    mockedGetCharacterById.mockResolvedValue({
+      _id: characterId,
+      userId,
+      name: "Elina",
+      avatarUrl: null,
+      height: null,
+      age: "23",
+      gender: "Female",
+      occupation: "Alchemist",
+      tags: ["Fantasy"],
+      profile: "Profile",
+      greeting: "Hi",
+      background: null,
+      visibility: "public",
+      copyrightConfirmed: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    mockedUpdateCharacter.mockResolvedValue({
+      _id: characterId,
+      userId,
+      name: "Elina V2",
+      avatarUrl: null,
+      height: null,
+      age: "24",
+      gender: "Female",
+      occupation: "Alchemist",
+      tags: ["Fantasy"],
+      profile: "Updated profile",
+      greeting: "Hi again",
+      background: null,
+      visibility: "private",
+      copyrightConfirmed: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const formData = new FormData();
+    formData.set("name", "Elina V2");
+    formData.set("age", "24");
+    formData.set("gender", "Female");
+    formData.set("occupation", "Alchemist");
+    formData.set("tags", "Fantasy");
+    formData.set("profile", "Updated profile");
+    formData.set("greeting", "Hi again");
+    formData.set("visibility", "private");
+    formData.set("copyrightConfirmed", "on");
+
+    const result = await updateCharacterAction(characterId.toString(), {}, formData);
+
+    expect(result.success).toBe(true);
+    expect(result.characterId).toBe(characterId.toString());
+    expect(mockedUpdateCharacter).toHaveBeenCalled();
   });
 });
 

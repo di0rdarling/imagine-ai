@@ -8,9 +8,9 @@ const appearanceClasses = {
 } as const;
 
 const sizeClasses = {
-  md: "h-11 text-sm",
-  lg: "h-12 text-sm",
-  sm: "h-9 text-xs",
+  md: "h-11 text-base md:text-sm",
+  lg: "h-12 text-base md:text-sm",
+  sm: "h-9 text-base md:text-xs",
 } as const;
 
 export type InputAppearance = keyof typeof appearanceClasses;

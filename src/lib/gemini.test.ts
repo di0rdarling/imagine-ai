@@ -27,6 +27,7 @@ describe("buildSystemInstruction", () => {
     expect(prompt).toContain("She knows the coordinates of a lost wormhole.");
     expect(prompt).toContain("All systems nominal. Where are we heading next?");
     expect(prompt).toContain("STAY COMPLETELY IN CHARACTER");
+    expect(prompt).toContain("UNDERSTANDING USER INPUT");
   });
 
   it("handles characters without optional fields gracefully", () => {

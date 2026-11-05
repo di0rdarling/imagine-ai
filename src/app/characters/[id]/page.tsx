@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 
 import { authOptions } from "@/lib/auth";
 import { getCharacterById } from "@/lib/characters";
+import { getConversation } from "@/lib/story-conversations";
 import { CharacterStoryView } from "./character-story-view";
 
 interface CharacterPageProps {
@@ -54,6 +55,23 @@ async function CharacterDetailContent({ params }: CharacterPageProps) {
     session?.user?.id && character.userId.toString() === session.user.id,
   );
 
+  let initialMessages: Array<{
+    id: string;
+    sender: "character" | "user";
+    text: string;
+  }> | null = null;
+
+  if (session?.user?.id) {
+    const saved = await getConversation(character._id, session.user.id);
+    if (saved && saved.messages && saved.messages.length > 0) {
+      initialMessages = saved.messages.map((m) => ({
+        id: m.id,
+        sender: m.sender,
+        text: m.text,
+      }));
+    }
+  }
+
   return (
     <CharacterStoryView
       character={{
@@ -72,6 +90,8 @@ async function CharacterDetailContent({ params }: CharacterPageProps) {
         createdAt: character.createdAt.toISOString(),
         isOwner,
       }}
+      userName={session?.user?.name || null}
+      initialMessages={initialMessages}
     />
   );
 }

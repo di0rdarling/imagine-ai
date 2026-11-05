@@ -12,6 +12,7 @@ import {
   getCharactersByUserId,
   getPublicCharacters,
   deleteCharacter,
+  updateCharacter,
 } from "./characters";
 
 const mockedGetDb = vi.mocked(getDb);
@@ -20,6 +21,7 @@ describe("characters repository", () => {
   const findOne = vi.fn();
   const insertOne = vi.fn();
   const deleteOne = vi.fn();
+  const updateOne = vi.fn();
   const createIndex = vi.fn().mockResolvedValue("index");
   const toArray = vi.fn();
   const limitMock = vi.fn().mockReturnValue({ toArray });
@@ -33,6 +35,7 @@ describe("characters repository", () => {
         findOne,
         insertOne,
         deleteOne,
+        updateOne,
         createIndex,
         find,
       }),
@@ -99,6 +102,38 @@ describe("characters repository", () => {
     expect(find).toHaveBeenCalledWith({ visibility: "public" });
     expect(limitMock).toHaveBeenCalledWith(10);
     expect(result).toEqual(docs);
+  });
+
+  it("updates a character only for the owning user", async () => {
+    const characterId = new ObjectId();
+    const userId = new ObjectId();
+    const updatedDoc = { _id: characterId, name: "Renamed", userId };
+    updateOne.mockResolvedValue({ matchedCount: 1 });
+    findOne.mockResolvedValue(updatedDoc);
+
+    const result = await updateCharacter(
+      characterId,
+      userId,
+      {
+        name: "Renamed",
+        age: "26",
+        gender: "Male",
+        occupation: "Mage",
+        tags: ["Fantasy"],
+        profile: "Updated profile text.",
+        greeting: "Hello again.",
+        visibility: "private",
+        copyrightConfirmed: true,
+      },
+    );
+
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: characterId, userId },
+      expect.objectContaining({
+        $set: expect.objectContaining({ name: "Renamed", visibility: "private" }),
+      }),
+    );
+    expect(result).toEqual(updatedDoc);
   });
 
   it("deletes a character only for the owning user", async () => {

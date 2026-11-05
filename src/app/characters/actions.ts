@@ -9,7 +9,7 @@ import {
   validateCharacterInput,
   type CharacterInput,
 } from "@/lib/character-validation";
-import { createCharacter, deleteCharacter } from "@/lib/characters";
+import { createCharacter, deleteCharacter, getCharacterById, updateCharacter } from "@/lib/characters";
 
 export type CharacterActionState = {
   error?: string;
@@ -52,6 +52,60 @@ export async function createCharacterAction(
       return { error: error.message };
     }
     return { error: "Failed to create character. Please try again." };
+  }
+}
+
+export async function updateCharacterAction(
+  characterId: string,
+  _prevState: CharacterActionState,
+  formData: FormData,
+): Promise<CharacterActionState> {
+  const session = await getServerSession(authOptions);
+
+  if (!session?.user?.id) {
+    return {
+      error: "You must be signed in to edit a character.",
+    };
+  }
+
+  const existing = await getCharacterById(characterId);
+  if (!existing) {
+    return { error: "Character not found." };
+  }
+
+  if (existing.userId.toString() !== session.user.id) {
+    return { error: "You do not have permission to edit this character." };
+  }
+
+  const fields = parseCharacterFormData(formData);
+  const validation = validateCharacterInput(fields);
+
+  if (!validation.isValid) {
+    return {
+      error: "Please review the highlighted fields.",
+      fieldErrors: validation.errors,
+    };
+  }
+
+  try {
+    const updated = await updateCharacter(characterId, session.user.id, fields);
+    if (!updated) {
+      return { error: "Could not update character. Please try again." };
+    }
+
+    revalidatePath("/characters");
+    revalidatePath(`/characters/${characterId}`);
+    revalidatePath(`/characters/${characterId}/edit`);
+
+    return {
+      success: true,
+      characterId: updated._id.toString(),
+    };
+  } catch (error) {
+    if (error instanceof Error) {
+      return { error: error.message };
+    }
+    return { error: "Failed to update character. Please try again." };
   }
 }
 

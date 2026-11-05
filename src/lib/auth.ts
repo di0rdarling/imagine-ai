@@ -29,12 +29,18 @@ export const authOptions: NextAuthOptions = {
     jwt({ token, user }) {
       if (user) {
         token.sub = user.id;
+        if (user.name) {
+          token.name = user.name;
+        }
       }
       return token;
     },
     session({ session, token }) {
       if (session.user && token.sub) {
         session.user.id = token.sub;
+        if (token.name) {
+          session.user.name = token.name;
+        }
       }
       return session;
     },

@@ -4,10 +4,15 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getCharacterById } from "@/lib/characters";
 import { generateCharacterResponse } from "@/lib/gemini";
+import {
+  resetConversation,
+  saveConversationMessages,
+} from "@/lib/story-conversations";
 
 interface ChatRequestBody {
   characterId: string;
   messages: Array<{
+    id?: string;
     sender: "character" | "user";
     text: string;
   }>;
@@ -62,10 +67,51 @@ export async function POST(request: Request) {
       messages: body.messages,
     });
 
+    const fullMessages = [
+      ...body.messages.map((m, i) => ({
+        id: m.id || `${m.sender}-${i}`,
+        sender: m.sender,
+        text: m.text,
+      })),
+      {
+        id: `char-${Date.now()}`,
+        sender: "character" as const,
+        text: reply,
+      },
+    ];
+
+    // Persist conversation to MongoDB
+    await saveConversationMessages(character._id, session.user.id, fullMessages);
+
     return NextResponse.json({ reply });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to generate character response.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const characterId = searchParams.get("characterId");
+    if (!characterId) {
+      return NextResponse.json(
+        { error: "characterId parameter is required" },
+        { status: 400 },
+      );
+    }
+
+    await resetConversation(characterId, session.user.id);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to reset conversation.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

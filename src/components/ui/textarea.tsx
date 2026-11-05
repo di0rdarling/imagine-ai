@@ -23,7 +23,7 @@ export function Textarea({
   return (
     <textarea
       className={cn(
-        "w-full text-sm leading-relaxed placeholder:text-zinc-400 outline-none ring-zinc-900/10 focus:ring-2 resize-none",
+        "w-full text-base md:text-sm leading-relaxed placeholder:text-zinc-400 outline-none ring-zinc-900/10 focus:ring-2 resize-none",
         appearance === "outline"
           ? "text-zinc-900 dark:text-zinc-50"
           : "text-zinc-900",

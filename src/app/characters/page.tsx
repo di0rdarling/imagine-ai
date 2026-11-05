@@ -251,21 +251,31 @@ function CharacterCard({
         </p>
       </div>
 
-      <Link
-        href={`/characters/${idStr}`}
-        className="mt-4 pt-3 border-t border-zinc-100 flex items-center justify-between text-xs font-semibold text-zinc-900 group-hover:text-zinc-600 transition"
-      >
-        <span>Enter Story Mode</span>
-        <svg
-          className="h-4 w-4 transform transition-transform group-hover:translate-x-1"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth="2.5"
-          stroke="currentColor"
+      <div className="mt-4 flex items-center gap-2 border-t border-zinc-100 pt-3">
+        <Link
+          href={`/characters/${idStr}`}
+          className="flex flex-1 items-center justify-between text-xs font-semibold text-zinc-900 group-hover:text-zinc-600 transition"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-        </svg>
-      </Link>
+          <span>Enter Story Mode</span>
+          <svg
+            className="h-4 w-4 transform transition-transform group-hover:translate-x-1"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth="2.5"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+          </svg>
+        </Link>
+        {isOwner ? (
+          <Link
+            href={`/characters/${idStr}/edit`}
+            className="inline-flex h-8 shrink-0 items-center rounded-full border border-zinc-200 px-3 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 transition"
+          >
+            Edit
+          </Link>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -108,6 +108,49 @@ export async function getPublicCharacters(limit = 20): Promise<CharacterDocument
     .toArray();
 }
 
+export async function updateCharacter(
+  characterId: string | ObjectId,
+  userId: string | ObjectId,
+  input: CharacterInput,
+): Promise<CharacterDocument | null> {
+  try {
+    const characterObjectId =
+      typeof characterId === "string" ? new ObjectId(characterId) : characterId;
+    const userObjectId = typeof userId === "string" ? new ObjectId(userId) : userId;
+    const collection = await charactersCollection();
+    const now = new Date();
+
+    const result = await collection.updateOne(
+      { _id: characterObjectId, userId: userObjectId },
+      {
+        $set: {
+          name: input.name.trim(),
+          avatarUrl: input.avatarUrl?.trim() || null,
+          height: input.height?.trim() || null,
+          age: input.age.trim(),
+          gender: input.gender.trim(),
+          occupation: input.occupation.trim(),
+          tags: input.tags.map((t) => t.trim()).filter(Boolean),
+          profile: input.profile.trim(),
+          greeting: input.greeting.trim(),
+          background: input.background?.trim() || null,
+          visibility: input.visibility,
+          copyrightConfirmed: input.copyrightConfirmed,
+          updatedAt: now,
+        },
+      },
+    );
+
+    if (result.matchedCount !== 1) {
+      return null;
+    }
+
+    return await collection.findOne({ _id: characterObjectId });
+  } catch {
+    return null;
+  }
+}
+
 export async function deleteCharacter(
   characterId: string | ObjectId,
   userId: string | ObjectId,

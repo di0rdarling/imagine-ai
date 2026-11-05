@@ -1,11 +1,13 @@
 "use client";
 
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { DeleteCharacterButton } from "@/app/characters/delete-character-button";
 import { Button, ConfirmDialog, Input } from "@/components/ui";
+import { parseStoryParagraphs, type StoryParagraphBlock } from "@/lib/story-formatter";
 
 export type SerializedCharacter = {
   id: string;
@@ -26,6 +28,12 @@ export type SerializedCharacter = {
 
 interface CharacterStoryViewProps {
   character: SerializedCharacter;
+  userName?: string | null;
+  initialMessages?: Array<{
+    id: string;
+    sender: "character" | "user";
+    text: string;
+  }> | null;
 }
 
 type ChatMessage = {
@@ -44,19 +52,30 @@ function createInitialMessages(greeting: string): ChatMessage[] {
   ];
 }
 
-export function CharacterStoryView({ character }: CharacterStoryViewProps) {
+export function CharacterStoryView({
+  character,
+  userName,
+  initialMessages,
+}: CharacterStoryViewProps) {
   const router = useRouter();
+  const { data: session } = useSession();
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const displayName = userName || session?.user?.name || "You";
+
   const [activeTab, setActiveTab] = useState<"story" | "info">("story");
-  const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    createInitialMessages(character.greeting),
-  );
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    if (initialMessages && initialMessages.length > 0) {
+      return initialMessages;
+    }
+    return createInitialMessages(character.greeting);
+  });
   const [inputMessage, setInputMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showStoryGuideModal, setShowStoryGuideModal] = useState(false);
 
   const hasConversation = messages.some((message) => message.sender === "user");
 
@@ -74,7 +93,7 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
     }
   }, [messages, isTyping, activeTab]);
 
-  const handleResetConversation = () => {
+  const handleResetConversation = async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -84,6 +103,15 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
     setInputMessage("");
     setMessages(createInitialMessages(character.greeting));
     setShowResetConfirm(false);
+
+    // Also clear conversation from database
+    try {
+      await fetch(`/api/characters/chat?characterId=${character.id}`, {
+        method: "DELETE",
+      });
+    } catch {
+      // Ignore network errors on background reset
+    }
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -170,6 +198,12 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
         onCancel={() => setShowResetConfirm(false)}
       />
 
+      <StoryGuideModal
+        open={showStoryGuideModal}
+        characterName={character.name}
+        onClose={() => setShowStoryGuideModal(false)}
+      />
+
       {/* Top Header Bar spanning full width */}
       <header className="shrink-0 border-b border-zinc-200/80 bg-white px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -225,6 +259,20 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
 
           {/* Right: Tab Navigation + Action Buttons */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Story Guide Help Button */}
+            <button
+              type="button"
+              onClick={() => setShowStoryGuideModal(true)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 hover:text-zinc-900 focus:outline-none"
+              title="How to write and format story responses"
+              aria-label="Story formatting guide"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <circle cx="12" cy="12" r="9" strokeWidth="2" />
+                <path strokeWidth="2" strokeLinecap="round" d="M12 16v-4M12 8h.01" />
+              </svg>
+            </button>
+
             <div className="flex rounded-xl bg-zinc-100 p-1">
               <button
                 type="button"
@@ -263,12 +311,20 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
             )}
 
             {character.isOwner ? (
-              <DeleteCharacterButton
-                variant="text"
-                characterId={character.id}
-                characterName={character.name}
-                onDeleted={() => router.push("/characters")}
-              />
+              <>
+                <Link
+                  href={`/characters/${character.id}/edit`}
+                  className="inline-flex h-9 items-center justify-center rounded-full bg-zinc-100 px-3.5 text-xs font-medium text-zinc-800 transition hover:bg-zinc-200"
+                >
+                  Edit
+                </Link>
+                <DeleteCharacterButton
+                  variant="text"
+                  characterId={character.id}
+                  characterName={character.name}
+                  onDeleted={() => router.push("/characters")}
+                />
+              </>
             ) : null}
           </div>
         </div>
@@ -333,7 +389,7 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
                 return (
                   <div
                     key={msg.id}
-                    className={`flex items-end gap-2.5 ${isChar ? "justify-start" : "justify-end"}`}
+                    className={`flex items-start gap-2.5 ${isChar ? "justify-start" : "justify-end"}`}
                   >
                     {isChar && (
                       character.avatarUrl ? (
@@ -351,18 +407,24 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
                     )}
 
                     <div
-                      className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                      className={`max-w-[88%] sm:max-w-[78%] rounded-3xl px-5 py-4 text-sm leading-relaxed transition ${
                         isChar
                           ? "bg-white text-zinc-900 border border-zinc-200/80 shadow-xs"
                           : "bg-zinc-900 text-white shadow-xs"
                       }`}
                     >
-                      {isChar && (
-                        <p className="mb-1 text-xs font-bold text-zinc-400">
-                          {character.name}
-                        </p>
-                      )}
-                      <p className="whitespace-pre-wrap">{msg.text}</p>
+                      {/* Speaker header */}
+                      <div className="mb-2 flex items-center gap-2">
+                        <span
+                          className={`text-xs font-bold tracking-tight ${
+                            isChar ? "text-zinc-900" : "text-zinc-200"
+                          }`}
+                        >
+                          {isChar ? character.name : displayName}
+                        </span>
+                      </div>
+
+                      <StoryMessageContent text={msg.text} isCharacter={isChar} />
                     </div>
                   </div>
                 );
@@ -403,25 +465,52 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
 
           {/* Sticky Message input pinned at bottom */}
           <div className="shrink-0 border-t border-zinc-200/80 bg-white px-4 py-3.5 sm:px-8">
-            <form onSubmit={handleSendMessage} className="mx-auto flex w-full max-w-3xl gap-2">
-              <Input
-                appearance="soft"
-                inputSize="lg"
-                className="flex-1"
-                placeholder={`Talk to ${character.name}... (e.g. "What is our mission?")`}
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                disabled={isTyping}
-                autoFocus
-              />
-              <Button
-                type="submit"
-                disabled={!inputMessage.trim() || isTyping}
-                className="rounded-2xl px-5"
-              >
-                Send
-              </Button>
-            </form>
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
+              <form onSubmit={handleSendMessage} className="flex w-full gap-2 items-center">
+                <Input
+                  appearance="soft"
+                  inputSize="lg"
+                  className="flex-1"
+                  placeholder={`Talk to ${character.name}... (e.g. *steps closer* "What is our mission?")`}
+                  value={inputMessage}
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  disabled={isTyping}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowStoryGuideModal(true)}
+                  className="hidden sm:inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-[#f8f9fa] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 transition"
+                  title="Writing tips & story formatting guide"
+                  aria-label="Story writing guide"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <circle cx="12" cy="12" r="9" strokeWidth="2" />
+                    <path strokeWidth="2" strokeLinecap="round" d="M12 16v-4M12 8h.01" />
+                  </svg>
+                </button>
+                <Button
+                  type="submit"
+                  disabled={!inputMessage.trim() || isTyping}
+                  className="rounded-2xl px-5"
+                >
+                  Send
+                </Button>
+              </form>
+
+              <div className="flex items-center justify-between px-1 text-[11px] text-zinc-400">
+                <span>
+                  Tip: Write naturally like a novel (e.g. <span className="text-zinc-600 italic">I laugh, &quot;I&apos;m awake!&quot; I type</span>) or use <code className="rounded bg-zinc-100 px-1 py-0.5 text-zinc-600">*actions*</code> and <code className="rounded bg-zinc-100 px-1 py-0.5 text-zinc-600">&quot;quotes&quot;</code>.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowStoryGuideModal(true)}
+                  className="underline hover:text-zinc-600 transition shrink-0 ml-2"
+                >
+                  Formatting guide
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       ) : (
@@ -509,6 +598,268 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function StoryMessageContent({
+  text,
+  isCharacter,
+}: {
+  text: string;
+  isCharacter: boolean;
+}) {
+  const blocks = parseStoryParagraphs(text);
+
+  // Fallback to simple rendered text if no blocks parsed
+  if (blocks.length === 0) {
+    return <p className="whitespace-pre-wrap">{text}</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {blocks.map((block, pIdx) => {
+        // Pure standalone dialogue paragraph (e.g. "Don't say anything. Yes, this is a $14,000 dress...")
+        if (block.kind === "standalone_dialogue") {
+          const dialogueText = block.tokens[0]?.text ?? block.rawText;
+          return (
+            <p
+              key={pIdx}
+              className={`text-sm leading-relaxed font-sans ${
+                isCharacter
+                  ? "text-zinc-900 font-medium"
+                  : "text-zinc-100 font-medium"
+              }`}
+            >
+              <span className={isCharacter ? "text-indigo-600 font-bold mr-0.5" : "text-indigo-300 font-bold mr-0.5"}>
+                &ldquo;
+              </span>
+              <span>{dialogueText}</span>
+              <span className={isCharacter ? "text-indigo-600 font-bold ml-0.5" : "text-indigo-300 font-bold ml-0.5"}>
+                &rdquo;
+              </span>
+            </p>
+          );
+        }
+
+        // Standalone action / narration paragraph (e.g. *Almost immediately, the three dots flash...*)
+        if (block.kind === "standalone_action") {
+          const actionText = block.tokens[0]?.text ?? block.rawText;
+          return (
+            <p
+              key={pIdx}
+              className={`text-sm leading-relaxed font-serif italic ${
+                isCharacter ? "text-zinc-600" : "text-zinc-300"
+              }`}
+            >
+              *{actionText}*
+            </p>
+          );
+        }
+
+        // Novel-style mixed paragraph (e.g. `I pick up my phone and laugh, "I'm awake!" I type.`)
+        if (block.kind === "mixed_paragraph") {
+          return (
+            <p
+              key={pIdx}
+              className={`text-sm leading-relaxed ${
+                isCharacter ? "text-zinc-800" : "text-zinc-200"
+              }`}
+            >
+              {block.tokens.map((tok, tIdx) => {
+                if (tok.type === "dialogue") {
+                  return (
+                    <span
+                      key={tIdx}
+                      className={
+                        isCharacter
+                          ? "font-medium text-zinc-900"
+                          : "font-medium text-white"
+                      }
+                    >
+                      <span className={isCharacter ? "text-indigo-600 font-bold" : "text-indigo-300 font-bold"}>
+                        &ldquo;
+                      </span>
+                      <span>{tok.text}</span>
+                      <span className={isCharacter ? "text-indigo-600 font-bold" : "text-indigo-300 font-bold"}>
+                        &rdquo;
+                      </span>
+                    </span>
+                  );
+                }
+
+                if (tok.type === "action") {
+                  return (
+                    <span
+                      key={tIdx}
+                      className={`font-serif italic ${
+                        isCharacter ? "text-zinc-600" : "text-zinc-300"
+                      }`}
+                    >
+                      *{tok.text}*
+                    </span>
+                  );
+                }
+
+                return <span key={tIdx}>{tok.text}</span>;
+              })}
+            </p>
+          );
+        }
+
+        // Untagged ambient / narrative text (e.g. first greeting paragraph)
+        return (
+          <p
+            key={pIdx}
+            className={`text-sm leading-relaxed font-serif italic ${
+              isCharacter ? "text-zinc-600" : "text-zinc-300"
+            }`}
+          >
+            {block.rawText}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function StoryGuideModal({
+  open,
+  characterName,
+  onClose,
+}: {
+  open: boolean;
+  characterName: string;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+      role="presentation"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
+        aria-label="Dismiss guide"
+        onClick={onClose}
+      />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="story-guide-title"
+        className="relative flex max-h-[90dvh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl text-zinc-900 [color-scheme:light]"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-zinc-100 px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <circle cx="12" cy="12" r="9" strokeWidth="2" />
+                <path strokeWidth="2" strokeLinecap="round" d="M12 16v-4M12 8h.01" />
+              </svg>
+            </div>
+            <div>
+              <h2 id="story-guide-title" className="text-base font-bold text-zinc-900">
+                Story Roleplay & Writing Guide
+              </h2>
+              <p className="text-xs text-zinc-500">
+                How to write immersive story turns with {characterName}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition"
+            aria-label="Close guide"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Scrollable Guide Content */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-6 text-sm">
+          <div>
+            <p className="text-zinc-700 leading-relaxed">
+              <span className="font-semibold text-zinc-900">{characterName}</span> reads both your
+              spoken dialogue and your physical actions. You can write in whatever style feels most natural to you!
+            </p>
+          </div>
+
+          {/* Breakdown cards */}
+          <div className="flex flex-col gap-3">
+            {/* Novel / Prose Style */}
+            <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
+                  ✍️
+                </span>
+                <h3 className="font-bold text-zinc-900 text-sm">Natural Novel Prose (Recommended)</h3>
+              </div>
+              <p className="mt-1.5 text-xs text-zinc-600 leading-relaxed">
+                You don&apos;t have to use asterisks if you don&apos;t want to! Just write like you&apos;re reading or writing a book, mixing dialogue tags and actions into your sentences.
+              </p>
+              <div className="mt-2.5 rounded-xl bg-white border border-indigo-200 px-3 py-2 text-xs text-zinc-800">
+                I pick up my phone and laugh, &ldquo;I&apos;m awake!&rdquo; I type.
+              </div>
+            </div>
+
+            {/* Script / Action Asterisks */}
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700">
+                  🎭
+                </span>
+                <h3 className="font-bold text-zinc-900 text-sm">Script & Asterisk Format</h3>
+              </div>
+              <p className="mt-1.5 text-xs text-zinc-600">
+                Prefer roleplay tags? Wrap actions in asterisks and speech in quotes:
+              </p>
+              <div className="mt-2.5 rounded-xl bg-zinc-50 border border-zinc-100 px-3 py-2 text-xs font-mono text-zinc-800">
+                *smirks and taps quickly on screen* &ldquo;You won&apos;t believe what just happened.&rdquo;
+              </div>
+            </div>
+
+            {/* Ambient Narration & World Context */}
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-100 text-xs font-bold text-amber-700">
+                  📖
+                </span>
+                <h3 className="font-bold text-zinc-900 text-sm">Setting the Scene & Narration</h3>
+              </div>
+              <p className="mt-1.5 text-xs text-zinc-600">
+                Describe the surroundings, background events, changes in weather, or timeskips.
+              </p>
+              <div className="mt-2.5 rounded-xl bg-zinc-50 border border-zinc-100 px-3 py-2 text-xs font-mono text-zinc-800">
+                The morning sun streams into the kitchen as the kettle begins to whistle.
+              </div>
+            </div>
+          </div>
+
+          {/* Quick takeaway */}
+          <div className="rounded-2xl border border-zinc-200 bg-[#f8f9fa] p-4 text-xs text-zinc-600 leading-relaxed">
+            <span className="font-semibold text-zinc-900">How {characterName} responds: </span>
+            {characterName} will understand what you are doing (e.g. typing on your phone, laughing) as well as what you said (&ldquo;I&apos;m awake!&rdquo;), and react to both in character.
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-zinc-100 px-6 py-3.5 bg-zinc-50 flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            onClick={onClose}
+            className="rounded-full px-6"
+          >
+            Got it, let&apos;s write
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

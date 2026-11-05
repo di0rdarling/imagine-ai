@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import React, { useRef, useState, useTransition } from "react";
 
-import { createCharacterAction, type CharacterActionState } from "@/app/characters/actions";
+import {
+  createCharacterAction,
+  updateCharacterAction,
+  type CharacterActionState,
+} from "@/app/characters/actions";
 import {
   AlertCard,
   Button,
@@ -28,25 +32,56 @@ const GENDER_OPTIONS = [
   { value: "Non-binary", label: "Non-binary" },
 ] as const;
 
-export function CharacterCreateForm() {
+export type CharacterFormInitialValues = {
+  name: string;
+  avatarUrl: string | null;
+  height: string;
+  age: string;
+  gender: string;
+  occupation: string;
+  tags: string[];
+  profile: string;
+  greeting: string;
+  background: string;
+  visibility: "private" | "public";
+};
+
+type CharacterCreateFormProps = {
+  mode?: "create" | "edit";
+  characterId?: string;
+  initialValues?: CharacterFormInitialValues;
+};
+
+export function CharacterCreateForm({
+  mode = "create",
+  characterId,
+  initialValues,
+}: CharacterCreateFormProps) {
+  const isEditMode = mode === "edit" && Boolean(characterId && initialValues);
   const router = useRouter();
   const { data: session, status: authStatus } = useSession();
   const [isPending, startTransition] = useTransition();
 
   // Form State
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [height, setHeight] = useState("");
-  const [age, setAge] = useState("");
-  const [gender, setGender] = useState<string>("Male");
-  const [occupation, setOccupation] = useState("");
-  const [tags, setTags] = useState<string[]>(["Anime", "Fantasy"]);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(
+    () => initialValues?.avatarUrl ?? null,
+  );
+  const [name, setName] = useState(() => initialValues?.name ?? "");
+  const [height, setHeight] = useState(() => initialValues?.height ?? "");
+  const [age, setAge] = useState(() => initialValues?.age ?? "");
+  const [gender, setGender] = useState<string>(() => initialValues?.gender ?? "Male");
+  const [occupation, setOccupation] = useState(() => initialValues?.occupation ?? "");
+  const [tags, setTags] = useState<string[]>(
+    () => initialValues?.tags ?? ["Anime", "Fantasy"],
+  );
   const [tagInput, setTagInput] = useState("");
   const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
-  const [profile, setProfile] = useState("");
-  const [greeting, setGreeting] = useState("");
-  const [background, setBackground] = useState("");
-  const [visibility, setVisibility] = useState<"private" | "public">("public");
+  const [profile, setProfile] = useState(() => initialValues?.profile ?? "");
+  const [greeting, setGreeting] = useState(() => initialValues?.greeting ?? "");
+  const [background, setBackground] = useState(() => initialValues?.background ?? "");
+  const [visibility, setVisibility] = useState<"private" | "public">(
+    () => initialValues?.visibility ?? "public",
+  );
   const [copyrightConfirmed, setCopyrightConfirmed] = useState(true);
 
   // Status & Feedback
@@ -107,8 +142,36 @@ export function CharacterCreateForm() {
     setTags(tags.filter((t) => t !== tagToRemove));
   };
 
+  const applyInitialValues = () => {
+    if (!initialValues) return;
+    setName(initialValues.name);
+    setHeight(initialValues.height);
+    setAge(initialValues.age);
+    setGender(initialValues.gender);
+    setOccupation(initialValues.occupation);
+    setTags(initialValues.tags);
+    setProfile(initialValues.profile);
+    setGreeting(initialValues.greeting);
+    setBackground(initialValues.background);
+    setVisibility(initialValues.visibility);
+    setAvatarPreview(initialValues.avatarUrl);
+    setCopyrightConfirmed(true);
+    setFormFeedback(null);
+    setSaveMessage(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
   // Form Reset / Clear
   const handleClear = () => {
+    if (isEditMode) {
+      const confirmReset = window.confirm("Reset the form to your last saved character details?");
+      if (!confirmReset) return;
+      applyInitialValues();
+      return;
+    }
+
     if (
       name ||
       profile ||
@@ -203,8 +266,15 @@ export function CharacterCreateForm() {
 
     if (authStatus !== "authenticated" || !session?.user?.id) {
       setFormFeedback({
-        error: "You must be signed in to create and save a character.",
+        error: isEditMode
+          ? "You must be signed in to edit a character."
+          : "You must be signed in to create and save a character.",
       });
+      return;
+    }
+
+    if (isEditMode && !characterId) {
+      setFormFeedback({ error: "Missing character to update." });
       return;
     }
 
@@ -225,15 +295,21 @@ export function CharacterCreateForm() {
     }
 
     startTransition(async () => {
-      const response = await createCharacterAction({}, formData);
+      const response = isEditMode
+        ? await updateCharacterAction(characterId!, {}, formData)
+        : await createCharacterAction({}, formData);
       if (response.error || response.fieldErrors) {
         setFormFeedback(response);
       } else if (response.success && response.characterId) {
-        localStorage.removeItem("imagine_ai_character_draft");
+        if (!isEditMode) {
+          localStorage.removeItem("imagine_ai_character_draft");
+        }
         router.push(`/characters/${response.characterId}`);
       }
     });
   };
+
+  const closeHref = isEditMode ? `/characters/${characterId}` : "/characters";
 
   // Background detail status helper
   const getBackgroundQualityFeedback = () => {
@@ -270,7 +346,7 @@ export function CharacterCreateForm() {
           type="button"
           variant="ghost"
           size="icon"
-          onClick={() => router.push("/characters")}
+          onClick={() => router.push(closeHref)}
           aria-label="Close"
         >
           <svg
@@ -285,26 +361,37 @@ export function CharacterCreateForm() {
         </Button>
 
         <div className="flex items-center gap-2">
+          {isEditMode ? (
+            <span className="text-xs font-semibold text-zinc-500">Edit character</span>
+          ) : null}
           {saveMessage && (
             <span className="text-xs font-medium text-emerald-600 transition">
               {saveMessage}
             </span>
           )}
-          <Button
-            type="button"
-            variant="soft"
-            size="sm"
-            onClick={handleRestoreDraft}
-            title="Restore saved draft"
-          >
-            Restore
-          </Button>
-          <Button type="button" variant="soft" size="sm" onClick={handleClear}>
-            Clear
-          </Button>
-          <Button type="button" variant="soft" size="sm" onClick={handleSaveDraft}>
-            Save
-          </Button>
+          {!isEditMode ? (
+            <>
+              <Button
+                type="button"
+                variant="soft"
+                size="sm"
+                onClick={handleRestoreDraft}
+                title="Restore saved draft"
+              >
+                Restore
+              </Button>
+              <Button type="button" variant="soft" size="sm" onClick={handleClear}>
+                Clear
+              </Button>
+              <Button type="button" variant="soft" size="sm" onClick={handleSaveDraft}>
+                Save
+              </Button>
+            </>
+          ) : (
+            <Button type="button" variant="soft" size="sm" onClick={handleClear}>
+              Reset
+            </Button>
+          )}
         </div>
       </div>
 
@@ -681,7 +768,13 @@ export function CharacterCreateForm() {
             disabled={isPending || !copyrightConfirmed}
             className="shadow-xl"
           >
-            {isPending ? "Creating Character…" : "Create"}
+            {isPending
+              ? isEditMode
+                ? "Saving Changes…"
+                : "Creating Character…"
+              : isEditMode
+                ? "Save Changes"
+                : "Create"}
           </Button>
         </StickyFormFooter>
       </form>
