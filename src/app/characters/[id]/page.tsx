@@ -27,10 +27,10 @@ export async function generateMetadata({
 
 export default function CharacterDetailPage({ params }: CharacterPageProps) {
   return (
-    <main className="min-h-screen bg-[#f8f9fa] px-4 py-8">
+    <main className="h-dvh flex flex-col bg-white overflow-hidden">
       <Suspense
         fallback={
-          <div className="mx-auto max-w-2xl py-12 text-center text-sm text-zinc-500">
+          <div className="flex h-full w-full items-center justify-center text-sm text-zinc-500">
             Loading character…
           </div>
         }
