@@ -1,19 +1,14 @@
+import { Suspense } from "react";
+
+import { SiteHeader } from "@/components/site-header";
+import { SiteHeaderFallback } from "@/components/site-header-fallback";
+
 export default function Home() {
   return (
     <div className="flex flex-1 flex-col bg-white text-zinc-900 dark:bg-black dark:text-zinc-50">
-      <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-6">
-        <span className="text-lg font-semibold tracking-tight">
-          A-Star Technologies
-        </span>
-        <nav className="flex gap-6 text-sm text-zinc-600 dark:text-zinc-400">
-          <a href="#about" className="hover:text-zinc-900 dark:hover:text-zinc-50">
-            About
-          </a>
-          <a href="#contact" className="hover:text-zinc-900 dark:hover:text-zinc-50">
-            Contact
-          </a>
-        </nav>
-      </header>
+      <Suspense fallback={<SiteHeaderFallback />}>
+        <SiteHeader />
+      </Suspense>
 
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center gap-24 px-6 py-24">
         <section className="flex max-w-2xl flex-col gap-6">
