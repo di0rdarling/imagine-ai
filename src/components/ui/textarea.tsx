@@ -12,16 +12,19 @@ export interface TextareaProps
   extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   appearance?: TextareaAppearance;
   withCharCount?: boolean;
+  ref?: React.Ref<HTMLTextAreaElement>;
 }
 
 export function Textarea({
   appearance = "outline",
   withCharCount = false,
   className,
+  ref,
   ...props
 }: TextareaProps) {
   return (
     <textarea
+      ref={ref}
       className={cn(
         "w-full text-base md:text-sm leading-relaxed placeholder:text-zinc-400 outline-none ring-zinc-900/10 focus:ring-2 resize-none",
         appearance === "outline"

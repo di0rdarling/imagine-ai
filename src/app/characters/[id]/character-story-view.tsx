@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { DeleteCharacterButton } from "@/app/characters/delete-character-button";
-import { Button, ConfirmDialog, Input } from "@/components/ui";
+import { Button, ConfirmDialog, Textarea } from "@/components/ui";
 import { parseStoryParagraphs, type StoryParagraphBlock } from "@/lib/story-formatter";
 import type { SupportingCharacter } from "@/lib/character-validation";
 import type { CastTransition } from "@/lib/gemini";
@@ -54,6 +54,19 @@ type ChatMessage = {
   text: string;
 };
 
+const COMPOSER_MAX_ROWS = 4;
+
+function resizeComposer(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  el.style.height = "auto";
+  const styles = window.getComputedStyle(el);
+  const lineHeight = Number.parseFloat(styles.lineHeight) || 22;
+  const paddingY =
+    Number.parseFloat(styles.paddingTop) + Number.parseFloat(styles.paddingBottom);
+  const maxHeight = lineHeight * COMPOSER_MAX_ROWS + paddingY;
+  el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+}
+
 function createInitialMessages(greeting: string): ChatMessage[] {
   return [
     {
@@ -75,6 +88,7 @@ export function CharacterStoryView({
   const { data: session } = useSession();
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   const displayName = userName || session?.user?.name || "You";
 
@@ -117,6 +131,10 @@ export function CharacterStoryView({
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, isTyping, activeTab]);
+
+  useEffect(() => {
+    resizeComposer(composerRef.current);
+  }, [inputMessage]);
 
   const handleResetConversation = async () => {
     if (abortControllerRef.current) {
@@ -675,16 +693,26 @@ export function CharacterStoryView({
           {/* Sticky Message input pinned at bottom */}
           <div className="shrink-0 border-t border-zinc-200/80 bg-white px-4 py-3.5 sm:px-8">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
-              <form onSubmit={handleSendMessage} className="flex w-full gap-2 items-center">
-                <Input
+              <form onSubmit={handleSendMessage} className="flex w-full gap-2 items-end">
+                <Textarea
+                  ref={composerRef}
                   appearance="soft"
-                  inputSize="lg"
-                  className="flex-1"
+                  rows={1}
+                  className="flex-1 min-h-12 py-3 overflow-y-auto"
                   placeholder={`Talk to ${character.name}... (e.g. *steps closer* "What is our mission?")`}
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
+                      return;
+                    }
+                    e.preventDefault();
+                    if (!inputMessage.trim() || isTyping) return;
+                    e.currentTarget.form?.requestSubmit();
+                  }}
                   disabled={isTyping}
                   autoFocus
+                  aria-label={`Message ${character.name}`}
                 />
                 <button
                   type="button"
