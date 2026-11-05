@@ -1,5 +1,6 @@
 import { getStoryMode, type StoryModeId } from "@/lib/story-modes";
 import type { SupportingCharacter } from "@/lib/character-validation";
+import { recapLooksIncomplete } from "@/lib/story-memory";
 
 export interface CharacterPersona {
   name: string;
@@ -32,6 +33,7 @@ export interface GenerateCharacterResponseOptions {
   mode?: StoryModeId;
   supportingCast?: SupportingCharacter[];
   transitions?: CastTransition[];
+  storyMemoryRecap?: string | null;
 }
 
 export function buildSystemInstruction(
@@ -39,6 +41,7 @@ export function buildSystemInstruction(
   modeId?: StoryModeId,
   supportingCastOverride?: SupportingCharacter[],
   transitions?: CastTransition[],
+  storyMemoryRecap?: string | null,
 ): string {
   const mode = getStoryMode(modeId);
   const traits = [
@@ -129,6 +132,14 @@ export function buildSystemInstruction(
     }
   }
 
+  const recap = storyMemoryRecap?.trim();
+  const memorySection = recap
+    ? `\n=== STORY SO FAR (COMPACT CONTINUITY MEMORY) ===
+The chat transcript for this turn only includes recent messages. Treat the recap below as canon for everything that happened earlier. Do not contradict it unless a recent turn clearly updates a detail.
+
+${recap}\n`
+    : "";
+
   return `You are roleplaying as the following character in an interactive story / conversation:
 
 === CHARACTER DOSSIER ===
@@ -138,7 +149,7 @@ ${traits}
 ${character.profile}
 
 ${character.background ? `=== BACKSTORY & SECRET KNOWLEDGE ===\n${character.background}\n` : ""}${castSection}
-${character.greeting ? `=== INITIAL OPENING GREETING ===\n"${character.greeting}"\n` : ""}${transitionSection}
+${character.greeting ? `=== INITIAL OPENING GREETING ===\n"${character.greeting}"\n` : ""}${memorySection}${transitionSection}
 === STORYTELLING MODE GUIDELINE ===
 ${mode.systemPromptGuideline}${multiCharacterGuidelines}
 
@@ -164,13 +175,148 @@ ${mode.systemPromptGuideline}${multiCharacterGuidelines}
      She lets out a soft sigh and glances down at her phone. "Are you still awake?" she texts back, waiting eagerly. A photo follows: a snapshot of the rainy street outside her window.
 5. Keep replies natural, engaging, and attuned to the pace of a roleplay or conversation. Do not write endless essays unless the scene demands a lengthy monologue.
 6. React directly to what the user says and does, and push the story or interaction forward.
-7. Always bring your sentences and thoughts to a clean, natural close. Never cut off or terminate mid-sentence.`;
+7. Always bring your sentences and thoughts to a clean, natural close. Never cut off or terminate mid-sentence.
+8. If compact continuity memory is present, honor those earlier facts, relationships, locations, and open threads while staying focused on the recent turns.`;
 }
 
-/**
- * Calls the Google Gemini API to generate the character's in-character response.
- * Defaults to "gemini-3.5-flash" (or GEMINI_MODEL env override if provided).
- */
+async function generateGeminiText({
+  model,
+  systemInstruction,
+  userText,
+  temperature,
+  maxOutputTokens,
+  thinkingBudget,
+}: {
+  model: string;
+  systemInstruction: string;
+  userText: string;
+  temperature: number;
+  maxOutputTokens: number;
+  thinkingBudget?: number;
+}): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "GEMINI_API_KEY environment variable is missing. Please set it in your environment or .env.local.",
+    );
+  }
+
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent?key=${apiKey}`;
+
+  const generationConfig: Record<string, unknown> = {
+    temperature,
+    topP: 0.95,
+    maxOutputTokens,
+  };
+  if (thinkingBudget !== undefined) {
+    generationConfig.thinkingConfig = { thinkingBudget };
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      system_instruction: {
+        parts: [{ text: systemInstruction }],
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: userText }],
+        },
+      ],
+      generationConfig,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    let errorMessage = `Gemini API responded with status ${response.status}`;
+    try {
+      const parsed = JSON.parse(errText);
+      if (parsed.error?.message) {
+        errorMessage = `Gemini API error: ${parsed.error.message}`;
+      }
+    } catch {
+      if (errText) errorMessage = `Gemini API error: ${errText}`;
+    }
+    throw new Error(errorMessage);
+  }
+
+  const data = await response.json();
+  const candidate = data?.candidates?.[0];
+  const parts = candidate?.content?.parts;
+  let fullText = "";
+
+  if (Array.isArray(parts)) {
+    fullText = parts
+      .filter((p: { text?: string; thought?: boolean }) => Boolean(p.text && !p.thought))
+      .map((p: { text: string }) => p.text)
+      .join("");
+  }
+
+  if (!fullText.trim()) {
+    if (candidate?.finishReason && candidate.finishReason !== "STOP") {
+      throw new Error(`Gemini response stopped with reason: ${candidate.finishReason}`);
+    }
+    throw new Error("Received empty response from Gemini.");
+  }
+
+  if (candidate?.finishReason === "MAX_TOKENS") {
+    throw new Error("Gemini recap was truncated (MAX_TOKENS).");
+  }
+
+  return fullText.trim();
+}
+
+export async function summarizeStoryMemory({
+  characterName,
+  existingRecap,
+  transcript,
+  model = process.env.GEMINI_MODEL || "gemini-3.5-flash",
+}: {
+  characterName: string;
+  existingRecap?: string | null;
+  transcript: string;
+  model?: string;
+}): Promise<string> {
+  const systemInstruction = `You are the continuity editor for an interactive story starring ${characterName}.
+Rewrite a compact story bible from the existing recap (if any) plus the new chapters.
+Rules:
+- Write in third person, past tense, plain prose. No in-character roleplay.
+- Preserve location, who is present or absent, relationship temperature, important facts, promises, secrets revealed, and open plot threads.
+- Drop filler dialogue, repeated sensory description, and discarded ideas.
+- Keep the recap under 450 words, but ALWAYS finish every sentence. Never cut off mid-thought or mid-sentence.
+- If the existing recap is incomplete or ends mid-sentence, rewrite it fully. Do not copy a truncation forward.
+- If a newer chapter updates an older fact, keep the newer fact.
+- Output ONLY the updated recap, no preamble.`;
+
+  const userText = `${
+    existingRecap?.trim()
+      ? `EXISTING RECAP:\n${existingRecap.trim()}\n\n`
+      : "EXISTING RECAP:\n(none yet)\n\n"
+  }NEW CHAPTERS TO FOLD IN:\n${transcript}`;
+
+  const recap = await generateGeminiText({
+    model,
+    systemInstruction,
+    userText,
+    temperature: 0.3,
+    maxOutputTokens: 4096,
+    thinkingBudget: 0,
+  });
+
+  if (recapLooksIncomplete(recap)) {
+    throw new Error("Story memory recap ended before a complete sentence.");
+  }
+
+  return recap;
+}
+
 export async function generateCharacterResponse({
   character,
   messages,
@@ -178,6 +324,7 @@ export async function generateCharacterResponse({
   mode,
   supportingCast,
   transitions,
+  storyMemoryRecap,
 }: GenerateCharacterResponseOptions): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -192,6 +339,7 @@ export async function generateCharacterResponse({
     mode,
     supportingCast,
     transitions,
+    storyMemoryRecap,
   );
 
   // Convert chat messages to Gemini's contents format

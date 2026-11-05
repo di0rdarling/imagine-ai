@@ -89,8 +89,9 @@ describe("story-conversations repository", () => {
         }),
       }),
     );
-    const setPayload = updateOne.mock.calls[0][1].$set;
-    expect(setPayload).not.toHaveProperty("supportingCast");
-    expect(setPayload).not.toHaveProperty("mode");
+    const updatePayload = updateOne.mock.calls[0][1];
+    expect(updatePayload.$set).not.toHaveProperty("supportingCast");
+    expect(updatePayload.$set).not.toHaveProperty("mode");
+    expect(updatePayload.$unset).toEqual({ storyMemory: "" });
   });
 });

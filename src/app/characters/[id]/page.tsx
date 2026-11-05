@@ -6,6 +6,7 @@ import type { Metadata } from "next";
 import { authOptions } from "@/lib/auth";
 import { getCharacterById } from "@/lib/characters";
 import { getConversation } from "@/lib/story-conversations";
+import { serializeStoryMemory } from "@/lib/story-memory";
 import { type StoryModeId } from "@/lib/story-modes";
 import { CharacterStoryView } from "./character-story-view";
 
@@ -63,6 +64,7 @@ async function CharacterDetailContent({ params }: CharacterPageProps) {
   }> | null = null;
   let initialMode: StoryModeId | undefined = undefined;
   let initialCast = character.supportingCast ?? [];
+  let initialStoryMemory = null;
 
   if (session?.user?.id) {
     const saved = await getConversation(character._id, session.user.id);
@@ -73,6 +75,7 @@ async function CharacterDetailContent({ params }: CharacterPageProps) {
       if (saved.supportingCast !== undefined) {
         initialCast = saved.supportingCast;
       }
+      initialStoryMemory = serializeStoryMemory(saved.storyMemory);
       if (saved.messages && saved.messages.length > 0) {
         initialMessages = saved.messages.map((m) => ({
           id: m.id,
@@ -106,6 +109,7 @@ async function CharacterDetailContent({ params }: CharacterPageProps) {
       initialMessages={initialMessages}
       initialMode={initialMode}
       initialCast={initialCast}
+      initialStoryMemory={initialStoryMemory}
     />
   );
 }

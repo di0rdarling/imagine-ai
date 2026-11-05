@@ -2,6 +2,7 @@ import { ObjectId, type Collection } from "mongodb";
 import { getDb } from "@/lib/mongodb";
 import type { StoryModeId } from "@/lib/story-modes";
 import type { SupportingCharacter } from "@/lib/character-validation";
+import type { StoryMemory } from "@/lib/story-memory";
 
 export type StoredChatMessage = {
   id: string;
@@ -16,6 +17,7 @@ export type StoryConversationDocument = {
   userId: ObjectId;
   mode?: StoryModeId;
   supportingCast?: SupportingCharacter[];
+  storyMemory?: StoryMemory;
   messages: StoredChatMessage[];
   createdAt: Date;
   updatedAt: Date;
@@ -72,6 +74,7 @@ export async function saveConversationMessages(
   }>,
   mode?: StoryModeId,
   supportingCast?: SupportingCharacter[],
+  storyMemory?: StoryMemory,
 ): Promise<boolean> {
   try {
     const charObjectId =
@@ -97,6 +100,9 @@ export async function saveConversationMessages(
     }
     if (supportingCast !== undefined) {
       updateFields.supportingCast = supportingCast;
+    }
+    if (storyMemory !== undefined) {
+      updateFields.storyMemory = storyMemory;
     }
 
     await collection.updateOne(
@@ -196,13 +202,17 @@ export async function resetConversation(
     const collection = await conversationsCollection();
     const now = new Date();
 
-    // Clear story messages only. Preserve supportingCast, mode, and other session settings.
+    // Clear story messages and compact memory only.
+    // Preserve supportingCast, mode, and other session settings.
     await collection.updateOne(
       { characterId: charObjectId, userId: userObjectId },
       {
         $set: {
           messages: [],
           updatedAt: now,
+        },
+        $unset: {
+          storyMemory: "",
         },
       },
     );

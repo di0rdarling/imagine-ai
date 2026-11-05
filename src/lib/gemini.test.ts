@@ -126,4 +126,19 @@ describe("buildSystemInstruction", () => {
     expect(prompt).toContain("Knocks and rushes in with lab results");
     expect(prompt).toContain("Narrate Toby's entrance naturally");
   });
+
+  it("includes compact story memory when a recap is provided", () => {
+    const prompt = buildSystemInstruction(
+      sampleCharacter,
+      "story",
+      undefined,
+      undefined,
+      "They escaped the station and promised to meet at dawn.",
+    );
+
+    expect(prompt).toContain("=== STORY SO FAR (COMPACT CONTINUITY MEMORY) ===");
+    expect(prompt).toContain("They escaped the station and promised to meet at dawn.");
+    expect(prompt).toContain("chat transcript for this turn only includes recent messages");
+    expect(prompt).toContain("If compact continuity memory is present");
+  });
 });

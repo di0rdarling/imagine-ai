@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import { getCharacterById } from "@/lib/characters";
-import { generateCharacterResponse, type CastTransition } from "@/lib/gemini";
+import { generateCharacterResponse, summarizeStoryMemory, type CastTransition } from "@/lib/gemini";
 import {
   getConversation,
   resetConversation,
@@ -11,6 +11,14 @@ import {
   updateConversationMode,
   updateConversationSupportingCast,
 } from "@/lib/story-conversations";
+import {
+  assembleTurnMessages,
+  fallbackContextOnSummarizeFailure,
+  formatTranscriptForSummary,
+  prepareModelContext,
+  serializeStoryMemory,
+  type StoryMemory,
+} from "@/lib/story-memory";
 import { type StoryModeId } from "@/lib/story-modes";
 import type { SupportingCharacter } from "@/lib/character-validation";
 
@@ -60,14 +68,62 @@ export async function POST(request: Request) {
       );
     }
 
-    // Resolve supporting cast (either explicitly passed, or loaded from conversation, or from character default)
-    let effectiveCast = body.supportingCast;
-    if (!effectiveCast) {
-      const existingConvo = await getConversation(character._id, session.user.id);
-      if (existingConvo?.supportingCast !== undefined) {
-        effectiveCast = existingConvo.supportingCast;
-      } else {
-        effectiveCast = character.supportingCast ?? [];
+    const existingConvo = await getConversation(character._id, session.user.id);
+
+    const effectiveCast =
+      body.supportingCast ??
+      existingConvo?.supportingCast ??
+      character.supportingCast ??
+      [];
+
+    let fullMessages;
+    try {
+      fullMessages = assembleTurnMessages(
+        existingConvo?.messages,
+        body.messages,
+        character.greeting,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "A user message is required.";
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
+
+    let storyMemory: StoryMemory | undefined = existingConvo?.storyMemory;
+    let prepared = prepareModelContext(fullMessages, storyMemory);
+
+    if (prepared.needsSummarization && prepared.messagesToFold.length > 0) {
+      try {
+        const recap = await summarizeStoryMemory({
+          characterName: character.name,
+          existingRecap: prepared.recap,
+          transcript: formatTranscriptForSummary(prepared.messagesToFold),
+        });
+        if (recap && prepared.coverThroughId) {
+          storyMemory = {
+            recap,
+            coveredThroughMessageId: prepared.coverThroughId,
+            updatedAt: new Date(),
+          };
+          prepared = {
+            ...prepared,
+            recap,
+            needsSummarization: false,
+            messagesToFold: [],
+          };
+        }
+      } catch {
+        const fallback = fallbackContextOnSummarizeFailure(
+          prepared,
+          prepared.unsummarized,
+        );
+        prepared = {
+          ...prepared,
+          recap: fallback.recap,
+          recentMessages: fallback.recentMessages,
+          needsSummarization: false,
+          messagesToFold: [],
+        };
       }
     }
 
@@ -84,18 +140,15 @@ export async function POST(request: Request) {
         background: character.background,
         supportingCast: effectiveCast,
       },
-      messages: body.messages,
+      messages: prepared.recentMessages,
       mode: body.mode,
       supportingCast: effectiveCast,
       transitions: body.transitions,
+      storyMemoryRecap: prepared.recap,
     });
 
-    const fullMessages = [
-      ...body.messages.map((m, i) => ({
-        id: m.id || `${m.sender}-${i}`,
-        sender: m.sender,
-        text: m.text,
-      })),
+    const persistedMessages = [
+      ...fullMessages,
       {
         id: `char-${Date.now()}`,
         sender: "character" as const,
@@ -103,16 +156,19 @@ export async function POST(request: Request) {
       },
     ];
 
-    // Persist conversation to MongoDB (including the active mode and supporting cast)
     await saveConversationMessages(
       character._id,
       session.user.id,
-      fullMessages,
+      persistedMessages,
       body.mode,
       effectiveCast,
+      storyMemory,
     );
 
-    return NextResponse.json({ reply });
+    return NextResponse.json({
+      reply,
+      storyMemory: serializeStoryMemory(storyMemory),
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to generate character response.";

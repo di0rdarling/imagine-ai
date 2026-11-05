@@ -7,9 +7,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { DeleteCharacterButton } from "@/app/characters/delete-character-button";
 import { Button, ConfirmDialog, Textarea } from "@/components/ui";
-import { parseStoryParagraphs, type StoryParagraphBlock } from "@/lib/story-formatter";
+import { parseStoryParagraphs } from "@/lib/story-formatter";
 import type { SupportingCharacter } from "@/lib/character-validation";
 import type { CastTransition } from "@/lib/gemini";
+import type { SerializedStoryMemory } from "@/lib/story-memory";
 
 import {
   DEFAULT_STORY_MODE,
@@ -46,6 +47,7 @@ interface CharacterStoryViewProps {
   }> | null;
   initialMode?: StoryModeId;
   initialCast?: SupportingCharacter[];
+  initialStoryMemory?: SerializedStoryMemory | null;
 }
 
 type ChatMessage = {
@@ -60,11 +62,12 @@ function resizeComposer(el: HTMLTextAreaElement | null) {
   if (!el) return;
   el.style.height = "auto";
   const styles = window.getComputedStyle(el);
-  const lineHeight = Number.parseFloat(styles.lineHeight) || 22;
+  const lineHeight = Number.parseFloat(styles.lineHeight) || 20;
   const paddingY =
     Number.parseFloat(styles.paddingTop) + Number.parseFloat(styles.paddingBottom);
   const maxHeight = lineHeight * COMPOSER_MAX_ROWS + paddingY;
-  el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+  const targetHeight = Math.max(44, Math.min(el.scrollHeight, maxHeight));
+  el.style.height = `${targetHeight}px`;
 }
 
 function createInitialMessages(greeting: string): ChatMessage[] {
@@ -77,12 +80,25 @@ function createInitialMessages(greeting: string): ChatMessage[] {
   ];
 }
 
+function formatMemoryUpdatedAt(value?: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export function CharacterStoryView({
   character,
   userName,
   initialMessages,
   initialMode,
   initialCast,
+  initialStoryMemory,
 }: CharacterStoryViewProps) {
   const router = useRouter();
   const { data: session } = useSession();
@@ -98,6 +114,10 @@ export function CharacterStoryView({
   );
   const [showModeModal, setShowModeModal] = useState(false);
   const [showCastModal, setShowCastModal] = useState(false);
+  const [showMemoryModal, setShowMemoryModal] = useState(false);
+  const [storyMemory, setStoryMemory] = useState<SerializedStoryMemory | null>(
+    () => initialStoryMemory ?? null,
+  );
   const [supportingCast, setSupportingCast] = useState<SupportingCharacter[]>(
     () => initialCast ?? character.supportingCast ?? [],
   );
@@ -113,6 +133,7 @@ export function CharacterStoryView({
   const [chatError, setChatError] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showStoryGuideModal, setShowStoryGuideModal] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const activeModeOption = getStoryMode(currentMode);
 
@@ -146,6 +167,7 @@ export function CharacterStoryView({
     setInputMessage("");
     setMessages(createInitialMessages(character.greeting));
     setPendingTransitions([]);
+    setStoryMemory(null);
     setShowResetConfirm(false);
 
     // Also clear conversation from database
@@ -237,6 +259,9 @@ export function CharacterStoryView({
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
     setInputMessage("");
+    if (composerRef.current) {
+      composerRef.current.style.height = "auto";
+    }
     setIsTyping(true);
     setChatError(null);
 
@@ -260,10 +285,13 @@ export function CharacterStoryView({
           mode: currentMode,
           supportingCast,
           transitions: transitionsToSend.length > 0 ? transitionsToSend : undefined,
-          messages: nextMessages.map((m) => ({
-            sender: m.sender,
-            text: m.text,
-          })),
+          messages: [
+            {
+              id: userMsg.id,
+              sender: userMsg.sender,
+              text: userMsg.text,
+            },
+          ],
         }),
         signal: controller.signal,
       });
@@ -282,6 +310,11 @@ export function CharacterStoryView({
           text: data.reply,
         },
       ]);
+      if (data.storyMemory?.recap) {
+        setStoryMemory(data.storyMemory);
+      } else if (data.storyMemory === null) {
+        setStoryMemory(null);
+      }
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
@@ -323,81 +356,106 @@ export function CharacterStoryView({
         onClose={() => setShowStoryGuideModal(false)}
       />
 
-      <StoryModeModal
-        open={showModeModal}
-        selectedMode={currentMode}
-        onSelectMode={handleSelectMode}
-        onClose={() => setShowModeModal(false)}
-      />
+      {showModeModal && (
+        <StoryModeModal
+          open={showModeModal}
+          selectedMode={currentMode}
+          onSelectMode={handleSelectMode}
+          onClose={() => setShowModeModal(false)}
+        />
+      )}
 
-      <CastManagerModal
-        open={showCastModal}
-        cast={supportingCast}
-        mainCharacterName={character.name}
-        onSave={handleUpdateCast}
-        onClose={() => setShowCastModal(false)}
-      />
+      {showCastModal && (
+        <CastManagerModal
+          open={showCastModal}
+          cast={supportingCast}
+          mainCharacterName={character.name}
+          onSave={handleUpdateCast}
+          onClose={() => setShowCastModal(false)}
+        />
+      )}
 
-      {/* Top Header Bar spanning full width */}
-      <header className="shrink-0 border-b border-zinc-200/80 bg-white px-4 py-3 sm:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Left: Back Link & Character Preview */}
-          <div className="flex items-center gap-3 min-w-0">
+      {showMemoryModal && (
+        <StoryMemoryModal
+          open={showMemoryModal}
+          memory={storyMemory}
+          characterName={character.name}
+          onClose={() => setShowMemoryModal(false)}
+        />
+      )}
+
+      {/* Top Header Bar spanning full width - single slim bar on mobile */}
+      <header className="relative shrink-0 border-b border-zinc-200/80 bg-white px-3 py-2 sm:px-6 sm:py-3">
+        <div className="flex items-center justify-between gap-2 sm:gap-4">
+          {/* Left: Back Link & Character Preview (Clickable to switch between Story & Dossier) */}
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <Link
               href="/characters"
-              className="inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs sm:text-sm font-semibold text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition sm:h-auto sm:w-auto sm:px-2.5 sm:py-1.5 sm:text-sm font-semibold"
               title="Back to Characters"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
               </svg>
-              <span className="hidden sm:inline">Back</span>
+              <span className="hidden sm:inline sm:ml-1.5">Back</span>
             </Link>
 
             <div className="hidden h-5 w-px bg-zinc-200 sm:block" />
 
-            {character.avatarUrl ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={character.avatarUrl}
-                alt={character.name}
-                className="h-9 w-9 sm:h-10 sm:w-10 shrink-0 rounded-xl object-cover border border-zinc-200"
-              />
-            ) : (
-              <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-sm font-bold text-white">
-                {character.name.charAt(0)}
-              </div>
-            )}
+            {/* Avatar & Name - on mobile, tapping toggles or opens Dossier */}
+            <button
+              type="button"
+              onClick={() => setActiveTab((prev) => (prev === "story" ? "info" : "story"))}
+              className="flex min-w-0 items-center gap-2 text-left rounded-xl p-1 -m-1 hover:bg-zinc-50 transition cursor-pointer"
+              title="Toggle Story / Character Dossier"
+            >
+              {character.avatarUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={character.avatarUrl}
+                  alt={character.name}
+                  className="h-8 w-8 sm:h-10 sm:w-10 shrink-0 rounded-xl object-cover border border-zinc-200"
+                />
+              ) : (
+                <div className="flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-xs sm:text-sm font-bold text-white">
+                  {character.name.charAt(0)}
+                </div>
+              )}
 
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="text-sm sm:text-base font-bold text-zinc-900 truncate">
-                  {character.name}
-                </h1>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                    character.visibility === "public"
-                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                      : "bg-zinc-100 text-zinc-600 border border-zinc-200"
-                  }`}
-                >
-                  {character.visibility}
-                </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <h1 className="text-xs sm:text-base font-bold text-zinc-900 truncate">
+                    {character.name}
+                  </h1>
+                  <span
+                    className={`hidden sm:inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                      character.visibility === "public"
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : "bg-zinc-100 text-zinc-600 border border-zinc-200"
+                    }`}
+                  >
+                    {character.visibility}
+                  </span>
+                </div>
+                <p className="text-[11px] sm:text-xs text-zinc-500 truncate flex items-center gap-1">
+                  <span>{character.occupation}</span>
+                  <span className="sm:hidden text-zinc-400 font-semibold">• Tap for info</span>
+                  <span className="hidden sm:inline">
+                    • Age {character.age}
+                    {character.height ? ` • ${character.height} cm` : ""} • {character.gender}
+                  </span>
+                </p>
               </div>
-              <p className="text-xs text-zinc-500 truncate">
-                {character.occupation} • Age {character.age}
-                {character.height ? ` • ${character.height} cm` : ""} • {character.gender}
-              </p>
-            </div>
+            </button>
           </div>
 
-          {/* Right: Tab Navigation + Action Buttons */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            {/* Story Mode Selector Trigger (Matching mobile pill in screenshot) */}
+          {/* Right: Actions */}
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            {/* Story Mode Selector Trigger */}
             <button
               type="button"
               onClick={() => setShowModeModal(true)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 transition"
+              className="inline-flex h-8 sm:h-9 shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 sm:px-3 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 transition"
               title="Change Storytelling Mode"
             >
               <span>{activeModeOption.icon}</span>
@@ -405,7 +463,7 @@ export function CharacterStoryView({
                 {activeModeOption.title}
               </span>
               <svg
-                className="h-3.5 w-3.5 text-zinc-400"
+                className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-zinc-400"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -423,7 +481,7 @@ export function CharacterStoryView({
             <button
               type="button"
               onClick={() => setShowCastModal(true)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 transition"
+              className="inline-flex h-8 sm:h-9 shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border border-zinc-200 bg-white px-2 sm:px-3 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 transition"
               title="Manage Supporting Cast & Scene Characters"
             >
               <span>👥</span>
@@ -437,73 +495,213 @@ export function CharacterStoryView({
               )}
             </button>
 
-            {/* Story Guide Help Button */}
+            {/* Story Memory Trigger (desktop, or on mobile inside overflow) */}
             <button
               type="button"
-              onClick={() => setShowStoryGuideModal(true)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 hover:text-zinc-900 focus:outline-none"
-              title="How to write and format story responses"
-              aria-label="Story formatting guide"
+              onClick={() => setShowMemoryModal(true)}
+              className="hidden sm:inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 transition"
+              title="View compact story memory"
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <circle cx="12" cy="12" r="9" strokeWidth="2" />
-                <path strokeWidth="2" strokeLinecap="round" d="M12 16v-4M12 8h.01" />
-              </svg>
+              <span>📝</span>
+              <span className="font-medium text-zinc-800">Story so far</span>
+              {storyMemory?.recap ? (
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              ) : null}
             </button>
 
-            <div className="flex rounded-xl bg-zinc-100 p-1">
+            {/* Desktop Only: Tabs, Guide, Reset, Edit, Delete */}
+            <div className="hidden sm:flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setActiveTab("story")}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  activeTab === "story"
-                    ? "bg-white text-zinc-900 shadow-xs"
-                    : "text-zinc-500 hover:text-zinc-900"
-                }`}
+                onClick={() => setShowStoryGuideModal(true)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 hover:text-zinc-900 focus:outline-none"
+                title="How to write and format story responses"
+                aria-label="Story formatting guide"
               >
-                Story Mode & Chat
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <circle cx="12" cy="12" r="9" strokeWidth="2" />
+                  <path strokeWidth="2" strokeLinecap="round" d="M12 16v-4M12 8h.01" />
+                </svg>
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("info")}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  activeTab === "info"
-                    ? "bg-white text-zinc-900 shadow-xs"
-                    : "text-zinc-500 hover:text-zinc-900"
-                }`}
-              >
-                Character Dossier
-              </button>
+
+              <div className="flex shrink-0 rounded-xl bg-zinc-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("story")}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    activeTab === "story"
+                      ? "bg-white text-zinc-900 shadow-xs"
+                      : "text-zinc-500 hover:text-zinc-900"
+                  }`}
+                >
+                  Story Mode & Chat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("info")}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    activeTab === "info"
+                      ? "bg-white text-zinc-900 shadow-xs"
+                      : "text-zinc-500 hover:text-zinc-900"
+                  }`}
+                >
+                  Character Dossier
+                </button>
+              </div>
+
+              {activeTab === "story" && hasConversation && (
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setShowResetConfirm(true)}
+                  disabled={isTyping}
+                >
+                  Reset
+                </Button>
+              )}
+
+              {character.isOwner ? (
+                <>
+                  <Link
+                    href={`/characters/${character.id}/edit`}
+                    className="inline-flex h-9 shrink-0 items-center justify-center rounded-full bg-zinc-100 px-3.5 text-xs font-medium text-zinc-800 transition hover:bg-zinc-200"
+                  >
+                    Edit
+                  </Link>
+                  <DeleteCharacterButton
+                    variant="text"
+                    characterId={character.id}
+                    characterName={character.name}
+                    onDeleted={() => router.push("/characters")}
+                  />
+                </>
+              ) : null}
             </div>
 
-            {activeTab === "story" && hasConversation && (
-              <Button
+            {/* Mobile (•••) Overflow Menu Trigger */}
+            <div className="relative sm:hidden">
+              <button
                 type="button"
-                variant="danger"
-                size="sm"
-                onClick={() => setShowResetConfirm(true)}
-                disabled={isTyping}
+                onClick={() => setShowMobileMenu((prev) => !prev)}
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition ${
+                  showMobileMenu
+                    ? "border-zinc-400 bg-zinc-100 text-zinc-900"
+                    : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+                }`}
+                title="More actions"
+                aria-label="More actions"
+                aria-expanded={showMobileMenu}
               >
-                Reset
-              </Button>
-            )}
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2.5"
+                    d="M5 12h.01M12 12h.01M19 12h.01"
+                  />
+                </svg>
+              </button>
 
-            {character.isOwner ? (
-              <>
-                <Link
-                  href={`/characters/${character.id}/edit`}
-                  className="inline-flex h-9 items-center justify-center rounded-full bg-zinc-100 px-3.5 text-xs font-medium text-zinc-800 transition hover:bg-zinc-200"
-                >
-                  Edit
-                </Link>
-                <DeleteCharacterButton
-                  variant="text"
-                  characterId={character.id}
-                  characterName={character.name}
-                  onDeleted={() => router.push("/characters")}
-                />
-              </>
-            ) : null}
+              {/* Mobile Overflow Dropdown */}
+              {showMobileMenu && (
+                <>
+                  {/* Backdrop */}
+                  <div
+                    className="fixed inset-0 z-40 bg-black/10"
+                    onClick={() => setShowMobileMenu(false)}
+                  />
+
+                  <div className="absolute right-0 top-10 z-50 w-56 rounded-2xl border border-zinc-200 bg-white p-2 shadow-xl animate-in fade-in zoom-in-95 duration-150 text-zinc-900">
+                    <div className="px-3 py-1.5 border-b border-zinc-100 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
+                      View
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab((prev) => (prev === "story" ? "info" : "story"));
+                        setShowMobileMenu(false);
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 transition"
+                    >
+                      <span>{activeTab === "story" ? "View Dossier" : "Return to Story"}</span>
+                      <span className="text-zinc-400 text-xs">
+                        {activeTab === "story" ? "📋" : "💬"}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMemoryModal(true);
+                        setShowMobileMenu(false);
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 transition"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span>Story Memory Recap</span>
+                        {storyMemory?.recap ? (
+                          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        ) : null}
+                      </div>
+                      <span className="text-zinc-400 text-xs">📝</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowStoryGuideModal(true);
+                        setShowMobileMenu(false);
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 transition"
+                    >
+                      <span>Story Writing Guide</span>
+                      <span className="text-zinc-400 text-xs">💡</span>
+                    </button>
+
+                    {hasConversation && (
+                      <div className="mt-1 pt-1 border-t border-zinc-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMobileMenu(false);
+                            setShowResetConfirm(true);
+                          }}
+                          disabled={isTyping}
+                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition"
+                        >
+                          <span>Reset Story</span>
+                          <span className="text-xs">🔄</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {character.isOwner && (
+                      <div className="mt-1 pt-1 border-t border-zinc-100">
+                        <Link
+                          href={`/characters/${character.id}/edit`}
+                          onClick={() => setShowMobileMenu(false)}
+                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 transition"
+                        >
+                          <span>Edit Character</span>
+                          <span className="text-zinc-400 text-xs">✏️</span>
+                        </Link>
+                        <div className="flex w-full items-center justify-between rounded-xl px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 transition">
+                          <span>Delete Character</span>
+                          <DeleteCharacterButton
+                            variant="icon"
+                            characterId={character.id}
+                            characterName={character.name}
+                            onDeleted={() => router.push("/characters")}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -690,16 +888,16 @@ export function CharacterStoryView({
             </div>
           </div>
 
-          {/* Sticky Message input pinned at bottom */}
-          <div className="shrink-0 border-t border-zinc-200/80 bg-white px-4 py-3.5 sm:px-8">
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
-              <form onSubmit={handleSendMessage} className="flex w-full gap-2 items-end">
+          {/* Sticky Message input pinned at bottom with iOS home bar safe area */}
+          <div className="shrink-0 border-t border-zinc-200/80 bg-white px-3 pt-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-3.5">
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-1.5 sm:gap-2">
+              <form onSubmit={handleSendMessage} className="flex w-full items-end gap-2">
                 <Textarea
                   ref={composerRef}
                   appearance="soft"
                   rows={1}
-                  className="flex-1 min-h-12 py-3 overflow-y-auto"
-                  placeholder={`Talk to ${character.name}... (e.g. *steps closer* "What is our mission?")`}
+                  className="flex-1 min-h-[44px] max-h-36 py-2.5 px-3.5 sm:py-3 sm:px-4 text-base md:text-sm rounded-2xl overflow-y-auto leading-normal"
+                  placeholder={`Talk to ${character.name}...`}
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
                   onKeyDown={(e) => {
@@ -726,35 +924,47 @@ export function CharacterStoryView({
                     <path strokeWidth="2" strokeLinecap="round" d="M12 16v-4M12 8h.01" />
                   </svg>
                 </button>
-                <Button
+                <button
                   type="submit"
                   disabled={!inputMessage.trim() || isTyping}
-                  className="rounded-2xl px-5"
+                  aria-label="Send message"
+                  className="inline-flex h-11 w-11 sm:w-auto sm:px-5 shrink-0 items-center justify-center rounded-2xl bg-zinc-900 text-white shadow-xs transition hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Send
-                </Button>
+                  {/* Up-arrow icon on mobile */}
+                  <svg
+                    className="h-5 w-5 sm:hidden"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth="2.5"
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18" />
+                  </svg>
+                  {/* Text on larger screens */}
+                  <span className="hidden sm:inline text-sm font-semibold">Send</span>
+                </button>
               </form>
 
-              {/* Story mode badge above input bar */}
-              <div className="flex items-center justify-between px-1 text-[11px] text-zinc-400">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-zinc-500">Mode:</span>
+              {/* Story mode badge above input bar (desktop/tablet only — mobile has mode selector in the top bar) */}
+              <div className="hidden sm:flex items-center justify-between px-1 text-[11px] text-zinc-400">
+                <div className="flex items-center gap-1.5 truncate">
+                  <span className="text-zinc-400 shrink-0">Mode:</span>
                   <button
                     type="button"
                     onClick={() => setShowModeModal(true)}
-                    className="inline-flex items-center gap-1 font-semibold text-zinc-700 hover:text-zinc-950 underline"
+                    className="inline-flex items-center gap-1 font-semibold text-zinc-600 hover:text-zinc-900 transition underline truncate"
                   >
                     <span>{activeModeOption.icon}</span>
-                    <span>{activeModeOption.title}</span>
+                    <span className="truncate">{activeModeOption.title}</span>
                   </button>
-                  <span className="hidden sm:inline text-zinc-400">
+                  <span className="text-zinc-400">
                     — {activeModeOption.replyLength}
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowStoryGuideModal(true)}
-                  className="underline hover:text-zinc-600 transition shrink-0 ml-2"
+                  className="underline text-zinc-400 hover:text-zinc-600 transition shrink-0 ml-2"
                 >
                   Writing guide
                 </button>
@@ -764,8 +974,20 @@ export function CharacterStoryView({
         </div>
       ) : (
         /* Full-screen Character Dossier View */
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-white p-6 sm:p-10">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-10">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 sm:gap-8">
+            {/* Mobile banner to switch back to chat */}
+            <div className="sm:hidden flex items-center justify-between rounded-2xl bg-zinc-100 p-3 text-xs text-zinc-700">
+              <span className="font-medium">Viewing Character Dossier</span>
+              <button
+                type="button"
+                onClick={() => setActiveTab("story")}
+                className="font-bold text-zinc-950 underline"
+              >
+                Return to Chat →
+              </button>
+            </div>
+
             <div className="flex items-start gap-5">
               {character.avatarUrl ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
@@ -844,6 +1066,38 @@ export function CharacterStoryView({
                 </p>
               </div>
             )}
+
+            <div className="border-t border-zinc-100 pt-6">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                  Story so far
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowMemoryModal(true)}
+                  className="text-xs font-semibold text-purple-600 hover:text-purple-700"
+                >
+                  Open recap
+                </button>
+              </div>
+              {storyMemory?.recap ? (
+                <>
+                  <p className="mt-3 text-sm leading-relaxed text-zinc-800 whitespace-pre-wrap line-clamp-6">
+                    {storyMemory.recap}
+                  </p>
+                  {formatMemoryUpdatedAt(storyMemory.updatedAt) ? (
+                    <p className="mt-2 text-[11px] text-zinc-400">
+                      Last updated {formatMemoryUpdatedAt(storyMemory.updatedAt)}
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="mt-3 text-sm leading-relaxed text-zinc-500">
+                  No recap yet. After this story runs longer, Imagine AI will keep a compact
+                  summary of earlier chapters here.
+                </p>
+              )}
+            </div>
 
             {supportingCast.length > 0 && (
               <div className="border-t border-zinc-100 pt-6">
@@ -1172,12 +1426,6 @@ function StoryModeModal({
 }) {
   const [tentativeMode, setTentativeMode] = useState<StoryModeId>(selectedMode);
 
-  useEffect(() => {
-    if (open) {
-      setTentativeMode(selectedMode);
-    }
-  }, [open, selectedMode]);
-
   if (!open) return null;
 
   const modeList = Object.values(STORY_MODES);
@@ -1298,13 +1546,6 @@ function CastManagerModal({
 }) {
   const [localCast, setLocalCast] = useState<SupportingCharacter[]>(cast);
   const [transitionReasons, setTransitionReasons] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (open) {
-      setLocalCast(cast);
-      setTransitionReasons({});
-    }
-  }, [open, cast]);
 
   if (!open) return null;
 
@@ -1587,6 +1828,94 @@ function CastManagerModal({
             className="rounded-full px-6 bg-zinc-900 text-white hover:bg-zinc-800"
           >
             Save Scene Cast
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StoryMemoryModal({
+  open,
+  memory,
+  characterName,
+  onClose,
+}: {
+  open: boolean;
+  memory: SerializedStoryMemory | null;
+  characterName: string;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+
+  const updatedLabel = formatMemoryUpdatedAt(memory?.updatedAt);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-0 sm:p-4"
+      role="presentation"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
+        aria-label="Dismiss modal"
+        onClick={onClose}
+      />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="story-memory-title"
+        className="relative flex w-full max-w-lg max-h-[85vh] flex-col overflow-hidden rounded-t-[32px] sm:rounded-3xl border border-zinc-200 bg-white shadow-2xl text-zinc-900 [color-scheme:light] animate-in fade-in slide-in-from-bottom-4 duration-200"
+      >
+        <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-zinc-100">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-xl">📝</span>
+            <div className="min-w-0">
+              <h2 id="story-memory-title" className="text-base sm:text-lg font-bold text-zinc-900">
+                Story so far
+              </h2>
+              <p className="text-xs text-zinc-500">
+                Compact memory used for earlier chapters with {characterName}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6">
+          {memory?.recap ? (
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4">
+              <p className="text-sm leading-relaxed text-zinc-800 whitespace-pre-wrap">
+                {memory.recap}
+              </p>
+              {updatedLabel ? (
+                <p className="mt-3 text-[11px] text-zinc-400">Last updated {updatedLabel}</p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-zinc-200 p-8 text-center">
+              <span className="text-3xl">📖</span>
+              <h3 className="mt-2 text-sm font-bold text-zinc-800">No recap yet</h3>
+              <p className="mt-1 text-xs text-zinc-500 max-w-sm mx-auto">
+                While the story is still short, the full conversation is sent each turn.
+                After it runs longer, a compact summary of earlier chapters will appear here
+                so you can see what the model is treating as canon.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-zinc-100 px-6 py-3.5 bg-zinc-50 flex justify-end">
+          <Button type="button" size="sm" onClick={onClose} className="rounded-full px-6">
+            Close
           </Button>
         </div>
       </div>
