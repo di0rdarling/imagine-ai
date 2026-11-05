@@ -71,6 +71,7 @@ async function EditCharacterContent({ params }: EditCharacterPageProps) {
     greeting: character.greeting,
     background: character.background ?? "",
     visibility: character.visibility,
+    supportingCast: character.supportingCast ?? [],
   };
 
   return (

@@ -1,7 +1,9 @@
 import { ObjectId, type Collection } from "mongodb";
 
 import { getDb } from "@/lib/mongodb";
-import type { CharacterInput } from "@/lib/character-validation";
+import type { CharacterInput, SupportingCharacter } from "@/lib/character-validation";
+
+export type { SupportingCharacter };
 
 export type CharacterDocument = {
   _id: ObjectId;
@@ -18,6 +20,7 @@ export type CharacterDocument = {
   background: string | null;
   visibility: "private" | "public";
   copyrightConfirmed: boolean;
+  supportingCast?: SupportingCharacter[];
   createdAt: Date;
   updatedAt: Date;
 };
@@ -63,6 +66,7 @@ export async function createCharacter(
     background: input.background?.trim() || null,
     visibility: input.visibility,
     copyrightConfirmed: input.copyrightConfirmed,
+    supportingCast: input.supportingCast ?? [],
     createdAt: now,
     updatedAt: now,
   };
@@ -136,6 +140,7 @@ export async function updateCharacter(
           background: input.background?.trim() || null,
           visibility: input.visibility,
           copyrightConfirmed: input.copyrightConfirmed,
+          supportingCast: input.supportingCast ?? [],
           updatedAt: now,
         },
       },

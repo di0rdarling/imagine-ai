@@ -110,4 +110,35 @@ describe("parseCharacterFormData", () => {
     expect(parsed.visibility).toBe("private");
     expect(parsed.copyrightConfirmed).toBe(true);
   });
+
+  it("parses supporting cast from JSON in form data", () => {
+    const formData = new FormData();
+    formData.set("name", "Kael");
+    formData.set("age", "28");
+    formData.set("gender", "Male");
+    formData.set("occupation", "Cyber Hacker");
+    formData.set("tags", "Cyberpunk");
+    formData.set("profile", "A netrunner.");
+    formData.set("greeting", "Hello.");
+    formData.set("visibility", "public");
+    formData.set("copyrightConfirmed", "true");
+    formData.set(
+      "supportingCast",
+      JSON.stringify([
+        {
+          id: "cast-1",
+          name: "Nyx",
+          role: "Fixer",
+          description: "Smuggles hardware",
+          inScene: true,
+        },
+      ]),
+    );
+
+    const parsed = parseCharacterFormData(formData);
+    expect(parsed.supportingCast).toHaveLength(1);
+    expect(parsed.supportingCast?.[0].name).toBe("Nyx");
+    expect(parsed.supportingCast?.[0].role).toBe("Fixer");
+    expect(parsed.supportingCast?.[0].inScene).toBe(true);
+  });
 });

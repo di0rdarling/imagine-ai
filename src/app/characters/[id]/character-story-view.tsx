@@ -8,6 +8,8 @@ import { useEffect, useRef, useState } from "react";
 import { DeleteCharacterButton } from "@/app/characters/delete-character-button";
 import { Button, ConfirmDialog, Input } from "@/components/ui";
 import { parseStoryParagraphs, type StoryParagraphBlock } from "@/lib/story-formatter";
+import type { SupportingCharacter } from "@/lib/character-validation";
+import type { CastTransition } from "@/lib/gemini";
 
 import {
   DEFAULT_STORY_MODE,
@@ -31,6 +33,7 @@ export type SerializedCharacter = {
   visibility: "private" | "public";
   createdAt: string;
   isOwner: boolean;
+  supportingCast?: SupportingCharacter[];
 };
 
 interface CharacterStoryViewProps {
@@ -42,6 +45,7 @@ interface CharacterStoryViewProps {
     text: string;
   }> | null;
   initialMode?: StoryModeId;
+  initialCast?: SupportingCharacter[];
 }
 
 type ChatMessage = {
@@ -65,6 +69,7 @@ export function CharacterStoryView({
   userName,
   initialMessages,
   initialMode,
+  initialCast,
 }: CharacterStoryViewProps) {
   const router = useRouter();
   const { data: session } = useSession();
@@ -78,6 +83,11 @@ export function CharacterStoryView({
     () => initialMode || DEFAULT_STORY_MODE,
   );
   const [showModeModal, setShowModeModal] = useState(false);
+  const [showCastModal, setShowCastModal] = useState(false);
+  const [supportingCast, setSupportingCast] = useState<SupportingCharacter[]>(
+    () => initialCast ?? character.supportingCast ?? [],
+  );
+  const [pendingTransitions, setPendingTransitions] = useState<CastTransition[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (initialMessages && initialMessages.length > 0) {
       return initialMessages;
@@ -117,6 +127,7 @@ export function CharacterStoryView({
     setChatError(null);
     setInputMessage("");
     setMessages(createInitialMessages(character.greeting));
+    setPendingTransitions([]);
     setShowResetConfirm(false);
 
     // Also clear conversation from database
@@ -148,6 +159,52 @@ export function CharacterStoryView({
     }
   };
 
+  const handleUpdateCast = async (
+    newCast: SupportingCharacter[],
+    detectedTransitions?: CastTransition[],
+  ) => {
+    // Detect transitions if not explicitly provided
+    const transitionsToRecord: CastTransition[] = detectedTransitions || [];
+    if (!detectedTransitions) {
+      for (const oldChar of supportingCast) {
+        const updated = newCast.find((c) => c.id === oldChar.id);
+        if (updated) {
+          if (oldChar.inScene && !updated.inScene) {
+            transitionsToRecord.push({
+              characterName: updated.name || oldChar.name,
+              type: "exit",
+            });
+          } else if (!oldChar.inScene && updated.inScene) {
+            transitionsToRecord.push({
+              characterName: updated.name || oldChar.name,
+              type: "entrance",
+            });
+          }
+        }
+      }
+    }
+
+    if (transitionsToRecord.length > 0) {
+      setPendingTransitions((prev) => [...prev, ...transitionsToRecord]);
+    }
+
+    setSupportingCast(newCast);
+
+    // Save updated cast to database in the background
+    try {
+      await fetch("/api/characters/chat", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          characterId: character.id,
+          supportingCast: newCast,
+        }),
+      });
+    } catch {
+      // Non-blocking background sync
+    }
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const userText = inputMessage.trim();
@@ -171,6 +228,9 @@ export function CharacterStoryView({
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    const transitionsToSend = [...pendingTransitions];
+    setPendingTransitions([]);
+
     try {
       const res = await fetch("/api/characters/chat", {
         method: "POST",
@@ -180,6 +240,8 @@ export function CharacterStoryView({
         body: JSON.stringify({
           characterId: character.id,
           mode: currentMode,
+          supportingCast,
+          transitions: transitionsToSend.length > 0 ? transitionsToSend : undefined,
           messages: nextMessages.map((m) => ({
             sender: m.sender,
             text: m.text,
@@ -205,6 +267,10 @@ export function CharacterStoryView({
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
+      }
+      // Restore pending transitions if request failed
+      if (transitionsToSend.length > 0) {
+        setPendingTransitions((prev) => [...transitionsToSend, ...prev]);
       }
       const message =
         err instanceof Error ? err.message : "Failed to communicate with the character.";
@@ -244,6 +310,14 @@ export function CharacterStoryView({
         selectedMode={currentMode}
         onSelectMode={handleSelectMode}
         onClose={() => setShowModeModal(false)}
+      />
+
+      <CastManagerModal
+        open={showCastModal}
+        cast={supportingCast}
+        mainCharacterName={character.name}
+        onSave={handleUpdateCast}
+        onClose={() => setShowCastModal(false)}
       />
 
       {/* Top Header Bar spanning full width */}
@@ -325,6 +399,24 @@ export function CharacterStoryView({
                   d="M19 9l-7 7-7-7"
                 />
               </svg>
+            </button>
+
+            {/* Cast Drawer Trigger */}
+            <button
+              type="button"
+              onClick={() => setShowCastModal(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 transition"
+              title="Manage Supporting Cast & Scene Characters"
+            >
+              <span>👥</span>
+              <span className="hidden sm:inline font-medium text-zinc-800">
+                Cast
+              </span>
+              {supportingCast.filter((c) => c.inScene).length > 0 && (
+                <span className="inline-flex items-center justify-center rounded-full bg-purple-100 px-1.5 py-0.2 text-[10px] font-bold text-purple-700">
+                  {supportingCast.filter((c) => c.inScene).length}
+                </span>
+              )}
             </button>
 
             {/* Story Guide Help Button */}
@@ -450,6 +542,55 @@ export function CharacterStoryView({
                   Story Started
                 </span>
               </div>
+
+              {/* In-Scene Cast Banner */}
+              {supportingCast.some((c) => c.inScene) && (
+                <div className="flex items-center justify-between rounded-2xl border border-purple-200/80 bg-purple-50/60 px-4 py-2 text-xs text-purple-900 shadow-2xs">
+                  <div className="flex items-center gap-2 overflow-x-auto py-0.5">
+                    <span className="font-semibold text-purple-800 shrink-0">In Scene:</span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 font-medium text-purple-950 border border-purple-200 shrink-0">
+                      ⭐ {character.name} (Lead)
+                    </span>
+                    {supportingCast
+                      .filter((c) => c.inScene)
+                      .map((c) => (
+                        <span
+                          key={c.id}
+                          className="inline-flex items-center gap-1 rounded-full bg-purple-100/80 px-2.5 py-0.5 font-medium text-purple-900 border border-purple-200 shrink-0"
+                        >
+                          👤 {c.name}
+                          {c.role ? <span className="opacity-60 text-[10px]">({c.role})</span> : null}
+                        </span>
+                      ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCastModal(true)}
+                    className="shrink-0 ml-2 font-semibold text-purple-700 hover:text-purple-900 underline text-xs"
+                  >
+                    Manage
+                  </button>
+                </div>
+              )}
+
+              {/* Pending Transition Notification Pill */}
+              {pendingTransitions.length > 0 && (
+                <div className="flex items-center gap-2 rounded-2xl border border-amber-200/90 bg-amber-50/80 px-4 py-2 text-xs text-amber-900 animate-in fade-in duration-150">
+                  <span className="text-sm">🎬</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="font-semibold">Next turn scene transition: </span>
+                    {pendingTransitions.map((t, idx) => (
+                      <span key={idx} className="mr-2">
+                        {t.characterName}{" "}
+                        <span className={t.type === "exit" ? "text-rose-700 font-medium" : "text-emerald-700 font-medium"}>
+                          {t.type === "exit" ? "will leave the scene" : "will enter the scene"}
+                        </span>
+                        {idx < pendingTransitions.length - 1 ? ";" : ""}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Message bubbles */}
               {messages.map((msg) => {
@@ -673,6 +814,51 @@ export function CharacterStoryView({
                 <p className="mt-3 text-sm leading-relaxed text-zinc-800 whitespace-pre-wrap">
                   {character.background}
                 </p>
+              </div>
+            )}
+
+            {supportingCast.length > 0 && (
+              <div className="border-t border-zinc-100 pt-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                    Supporting Cast ({supportingCast.length})
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowCastModal(true)}
+                    className="text-xs font-semibold text-purple-600 hover:text-purple-700"
+                  >
+                    Manage Cast
+                  </button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {supportingCast.map((c) => (
+                    <div
+                      key={c.id}
+                      className="rounded-2xl border border-zinc-200 bg-zinc-50/60 p-3.5 text-xs text-zinc-700"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-zinc-900 text-sm">{c.name}</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            c.inScene
+                              ? "bg-purple-100 text-purple-800"
+                              : "bg-zinc-200 text-zinc-600"
+                          }`}
+                        >
+                          {c.inScene ? "In Scene" : "Off-Screen"}
+                        </span>
+                      </div>
+                      {c.role ? (
+                        <p className="mt-1 font-medium text-zinc-600">{c.role}</p>
+                      ) : null}
+                      {c.description ? (
+                        <p className="mt-1 text-zinc-500 italic">{c.description}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -1062,6 +1248,317 @@ function StoryModeModal({
             className="rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800"
           >
             Confirm
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CastManagerModal({
+  open,
+  cast,
+  mainCharacterName,
+  onSave,
+  onClose,
+}: {
+  open: boolean;
+  cast: SupportingCharacter[];
+  mainCharacterName: string;
+  onSave: (cast: SupportingCharacter[], transitions?: CastTransition[]) => void;
+  onClose: () => void;
+}) {
+  const [localCast, setLocalCast] = useState<SupportingCharacter[]>(cast);
+  const [transitionReasons, setTransitionReasons] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (open) {
+      setLocalCast(cast);
+      setTransitionReasons({});
+    }
+  }, [open, cast]);
+
+  if (!open) return null;
+
+  const handleToggleScene = (id: string) => {
+    setLocalCast((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, inScene: !c.inScene } : c)),
+    );
+  };
+
+  const handleRemove = (id: string) => {
+    setLocalCast((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  const handleAdd = () => {
+    if (localCast.length >= 8) return;
+    setLocalCast((prev) => [
+      ...prev,
+      {
+        id: `cast-${Date.now()}`,
+        name: "",
+        role: "",
+        description: "",
+        inScene: true,
+      },
+    ]);
+  };
+
+  const handleSave = () => {
+    const cleaned = localCast
+      .filter((c) => c.name.trim().length > 0)
+      .map((c) => ({
+        ...c,
+        name: c.name.trim(),
+        role: c.role.trim(),
+        description: (c.description || "").trim(),
+      }));
+
+    // Detect transitions with any custom reason provided by user
+    const detectedTransitions: CastTransition[] = [];
+    for (const oldChar of cast) {
+      const updated = cleaned.find((c) => c.id === oldChar.id);
+      if (updated) {
+        if (oldChar.inScene && !updated.inScene) {
+          detectedTransitions.push({
+            characterName: updated.name || oldChar.name,
+            type: "exit",
+            reason: transitionReasons[updated.id]?.trim() || undefined,
+          });
+        } else if (!oldChar.inScene && updated.inScene) {
+          detectedTransitions.push({
+            characterName: updated.name || oldChar.name,
+            type: "entrance",
+            reason: transitionReasons[updated.id]?.trim() || undefined,
+          });
+        }
+      }
+    }
+
+    onSave(cleaned, detectedTransitions.length > 0 ? detectedTransitions : undefined);
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-0 sm:p-4"
+      role="presentation"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
+        aria-label="Dismiss modal"
+        onClick={onClose}
+      />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cast-manager-title"
+        className="relative flex w-full max-w-lg max-h-[85vh] flex-col overflow-hidden rounded-t-[32px] sm:rounded-3xl border border-zinc-200 bg-white shadow-2xl text-zinc-900 [color-scheme:light] animate-in fade-in slide-in-from-bottom-4 duration-200"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-zinc-100">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">👥</span>
+            <div>
+              <h2 id="cast-manager-title" className="text-base sm:text-lg font-bold text-zinc-900">
+                Supporting Cast & Scene
+              </h2>
+              <p className="text-xs text-zinc-500">
+                Characters who converse, react, and banter alongside {mainCharacterName}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Cast list scrollable area */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col gap-3">
+          {localCast.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-zinc-200 p-8 text-center">
+              <span className="text-3xl">🎭</span>
+              <h3 className="mt-2 text-sm font-bold text-zinc-800">No supporting cast yet</h3>
+              <p className="mt-1 text-xs text-zinc-500 max-w-sm mx-auto">
+                Add friends, rivals, or sidekicks. {mainCharacterName} will direct the scene,
+                narrate their actions, and include their dialogue in responses!
+              </p>
+            </div>
+          ) : (
+            localCast.map((c, idx) => (
+              <div
+                key={c.id}
+                className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4 transition"
+              >
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-zinc-200/60">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                      #{idx + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleScene(c.id)}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold transition ${
+                        c.inScene
+                          ? "bg-purple-100 text-purple-800 border border-purple-200"
+                          : "bg-zinc-200 text-zinc-600 border border-zinc-300"
+                      }`}
+                      title="Click to toggle in-scene status"
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${c.inScene ? "bg-purple-600" : "bg-zinc-400"}`} />
+                      {c.inScene ? "In Scene (Speaking)" : "Off-Screen (Absent)"}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(c.id)}
+                    className="text-xs font-medium text-rose-500 hover:text-rose-700 hover:underline"
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-600 mb-1">
+                      Name
+                    </label>
+                    <input
+                      type="text"
+                      value={c.name}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setLocalCast((prev) =>
+                          prev.map((item) =>
+                            item.id === c.id ? { ...item, name: val } : item,
+                          ),
+                        );
+                      }}
+                      placeholder="e.g. Sarah"
+                      maxLength={30}
+                      className="w-full rounded-xl bg-white px-3 py-1.5 text-sm text-zinc-900 border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-600 mb-1">
+                      Role / Dynamic
+                    </label>
+                    <input
+                      type="text"
+                      value={c.role}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setLocalCast((prev) =>
+                          prev.map((item) =>
+                            item.id === c.id ? { ...item, role: val } : item,
+                          ),
+                        );
+                      }}
+                      placeholder="e.g. Sarcastic Partner, Rookie Detective"
+                      maxLength={50}
+                      className="w-full rounded-xl bg-white px-3 py-1.5 text-sm text-zinc-900 border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-2.5">
+                  <label className="block text-[11px] font-semibold text-zinc-600 mb-1">
+                    Personality Quirks & Voice
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={c.description || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setLocalCast((prev) =>
+                        prev.map((item) =>
+                          item.id === c.id ? { ...item, description: val } : item,
+                        ),
+                      );
+                    }}
+                    placeholder="e.g. Sharp-tongued, observant, sips coffee constantly."
+                    maxLength={300}
+                    className="w-full rounded-xl bg-white px-3 py-1.5 text-xs text-zinc-900 border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900 resize-none"
+                  />
+                </div>
+
+                {/* Transition reason input shown when scene presence has changed */}
+                {(() => {
+                  const original = cast.find((orig) => orig.id === c.id);
+                  if (!original || original.inScene === c.inScene) return null;
+                  const isExiting = original.inScene && !c.inScene;
+                  return (
+                    <div className="mt-2.5 rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 text-xs">
+                      <div className="flex items-center gap-1.5 font-semibold text-amber-900 mb-1">
+                        <span>🎬</span>
+                        <span>
+                          {isExiting
+                            ? `${c.name || "Character"} is exiting the scene`
+                            : `${c.name || "Character"} is entering the scene`}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-amber-700 mb-1.5">
+                        {isExiting
+                          ? "How should they leave? (Leave blank to let AI write a natural exit)"
+                          : "How do they arrive? (Leave blank to let AI write a natural entrance)"}
+                      </p>
+                      <input
+                        type="text"
+                        value={transitionReasons[c.id] || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setTransitionReasons((prev) => ({
+                            ...prev,
+                            [c.id]: val,
+                          }));
+                        }}
+                        placeholder={
+                          isExiting
+                            ? "e.g. Received an urgent phone call, stepped out angrily, excused themselves to bed"
+                            : "e.g. Knocked on the door, walked in carrying drinks, ran over"
+                        }
+                        maxLength={100}
+                        className="w-full rounded-lg bg-white px-2.5 py-1 text-xs text-zinc-900 border border-amber-300 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                    </div>
+                  );
+                })()}
+              </div>
+            ))
+          )}
+
+          <button
+            type="button"
+            onClick={handleAdd}
+            disabled={localCast.length >= 8}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-2.5 text-xs font-semibold text-zinc-800 shadow-2xs hover:bg-zinc-50 transition disabled:opacity-50"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+            </svg>
+            Add Character ({localCast.length}/8)
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-zinc-100 px-6 py-3.5 bg-zinc-50 flex items-center justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleSave}
+            className="rounded-full px-6 bg-zinc-900 text-white hover:bg-zinc-800"
+          >
+            Save Scene Cast
           </Button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { ObjectId, type Collection } from "mongodb";
 import { getDb } from "@/lib/mongodb";
 import type { StoryModeId } from "@/lib/story-modes";
+import type { SupportingCharacter } from "@/lib/character-validation";
 
 export type StoredChatMessage = {
   id: string;
@@ -14,6 +15,7 @@ export type StoryConversationDocument = {
   characterId: ObjectId;
   userId: ObjectId;
   mode?: StoryModeId;
+  supportingCast?: SupportingCharacter[];
   messages: StoredChatMessage[];
   createdAt: Date;
   updatedAt: Date;
@@ -69,6 +71,7 @@ export async function saveConversationMessages(
     text: string;
   }>,
   mode?: StoryModeId,
+  supportingCast?: SupportingCharacter[],
 ): Promise<boolean> {
   try {
     const charObjectId =
@@ -92,6 +95,9 @@ export async function saveConversationMessages(
     if (mode) {
       updateFields.mode = mode;
     }
+    if (supportingCast !== undefined) {
+      updateFields.supportingCast = supportingCast;
+    }
 
     await collection.updateOne(
       { characterId: charObjectId, userId: userObjectId },
@@ -99,6 +105,40 @@ export async function saveConversationMessages(
         $set: updateFields,
         $setOnInsert: {
           _id: new ObjectId(),
+          createdAt: now,
+        },
+      },
+      { upsert: true },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function updateConversationSupportingCast(
+  characterId: string | ObjectId,
+  userId: string | ObjectId,
+  supportingCast: SupportingCharacter[],
+): Promise<boolean> {
+  try {
+    const charObjectId =
+      typeof characterId === "string" ? new ObjectId(characterId) : characterId;
+    const userObjectId =
+      typeof userId === "string" ? new ObjectId(userId) : userId;
+    const collection = await conversationsCollection();
+    const now = new Date();
+
+    await collection.updateOne(
+      { characterId: charObjectId, userId: userObjectId },
+      {
+        $set: {
+          supportingCast,
+          updatedAt: now,
+        },
+        $setOnInsert: {
+          _id: new ObjectId(),
+          messages: [],
           createdAt: now,
         },
       },
@@ -154,10 +194,18 @@ export async function resetConversation(
     const userObjectId =
       typeof userId === "string" ? new ObjectId(userId) : userId;
     const collection = await conversationsCollection();
-    await collection.deleteOne({
-      characterId: charObjectId,
-      userId: userObjectId,
-    });
+    const now = new Date();
+
+    // Clear story messages only. Preserve supportingCast, mode, and other session settings.
+    await collection.updateOne(
+      { characterId: charObjectId, userId: userObjectId },
+      {
+        $set: {
+          messages: [],
+          updatedAt: now,
+        },
+      },
+    );
     return true;
   } catch {
     return false;

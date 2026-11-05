@@ -1,3 +1,11 @@
+export type SupportingCharacter = {
+  id: string;
+  name: string;
+  role: string;
+  description?: string;
+  inScene: boolean;
+};
+
 export type CharacterInput = {
   name: string;
   avatarUrl?: string;
@@ -11,6 +19,7 @@ export type CharacterInput = {
   background?: string;
   visibility: "private" | "public";
   copyrightConfirmed: boolean;
+  supportingCast?: SupportingCharacter[];
 };
 
 export type CharacterValidationResult = {
@@ -128,6 +137,27 @@ export function parseCharacterFormData(formData: FormData): CharacterInput {
       .filter(Boolean);
   }
 
+  const rawCast = formData.get("supportingCast");
+  let supportingCast: SupportingCharacter[] | undefined = undefined;
+  if (typeof rawCast === "string" && rawCast.trim()) {
+    try {
+      const parsed = JSON.parse(rawCast);
+      if (Array.isArray(parsed)) {
+        supportingCast = parsed
+          .filter((item) => item && typeof item.name === "string" && item.name.trim())
+          .map((item, index) => ({
+            id: String(item.id || `cast-${Date.now()}-${index}`),
+            name: String(item.name).trim().slice(0, 30),
+            role: String(item.role || "").trim().slice(0, 50),
+            description: String(item.description || "").trim().slice(0, 300),
+            inScene: item.inScene !== false,
+          }));
+      }
+    } catch {
+      // Invalid JSON ignored
+    }
+  }
+
   return {
     name: String(formData.get("name") ?? "").trim(),
     avatarUrl: String(formData.get("avatarUrl") ?? "").trim(),
@@ -144,5 +174,6 @@ export function parseCharacterFormData(formData: FormData): CharacterInput {
       formData.get("copyrightConfirmed") === "true" ||
       formData.get("copyrightConfirmed") === "on" ||
       formData.get("copyrightConfirmed") === "1",
+    supportingCast,
   };
 }

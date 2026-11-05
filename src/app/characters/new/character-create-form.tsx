@@ -23,7 +23,7 @@ import {
   SegmentedControl,
   StickyFormFooter,
 } from "@/components/ui";
-import { PRESET_TAGS } from "@/lib/character-validation";
+import { PRESET_TAGS, type SupportingCharacter } from "@/lib/character-validation";
 import { readImageAsCompressedDataUrl } from "@/lib/resize-image";
 
 const GENDER_OPTIONS = [
@@ -44,6 +44,7 @@ export type CharacterFormInitialValues = {
   greeting: string;
   background: string;
   visibility: "private" | "public";
+  supportingCast?: SupportingCharacter[];
 };
 
 type CharacterCreateFormProps = {
@@ -79,6 +80,9 @@ export function CharacterCreateForm({
   const [profile, setProfile] = useState(() => initialValues?.profile ?? "");
   const [greeting, setGreeting] = useState(() => initialValues?.greeting ?? "");
   const [background, setBackground] = useState(() => initialValues?.background ?? "");
+  const [supportingCast, setSupportingCast] = useState<SupportingCharacter[]>(
+    () => initialValues?.supportingCast ?? [],
+  );
   const [visibility, setVisibility] = useState<"private" | "public">(
     () => initialValues?.visibility ?? "public",
   );
@@ -192,6 +196,7 @@ export function CharacterCreateForm({
     setProfile("");
     setGreeting("");
     setBackground("");
+    setSupportingCast([]);
     setVisibility("public");
     setAvatarPreview(null);
     setCopyrightConfirmed(true);
@@ -215,6 +220,7 @@ export function CharacterCreateForm({
         profile,
         greeting,
         background,
+        supportingCast,
         visibility,
         copyrightConfirmed,
         avatarPreview,
@@ -246,6 +252,7 @@ export function CharacterCreateForm({
       if (draft.profile) setProfile(draft.profile);
       if (draft.greeting) setGreeting(draft.greeting);
       if (draft.background) setBackground(draft.background);
+      if (Array.isArray(draft.supportingCast)) setSupportingCast(draft.supportingCast);
       if (draft.visibility) setVisibility(draft.visibility);
       if (typeof draft.copyrightConfirmed === "boolean") {
         setCopyrightConfirmed(draft.copyrightConfirmed);
@@ -290,6 +297,7 @@ export function CharacterCreateForm({
     formData.set("background", background);
     formData.set("visibility", visibility);
     formData.set("copyrightConfirmed", copyrightConfirmed ? "on" : "off");
+    formData.set("supportingCast", JSON.stringify(supportingCast));
     if (avatarPreview) {
       formData.set("avatarUrl", avatarPreview);
     }
@@ -692,6 +700,147 @@ export function CharacterCreateForm({
             placeholder="Background, family, personality, preferences, etc."
           />
           <div className="px-1">{getBackgroundQualityFeedback()}</div>
+        </FormSection>
+
+        <FormSection
+          title="Supporting Cast (Optional)"
+          description="Companions, allies, sidekicks, or rivals who can appear and speak in the story"
+          className="[&>div:last-child]:gap-3"
+        >
+          {supportingCast.length > 0 ? (
+            <div className="flex flex-col gap-3">
+              {supportingCast.map((member, idx) => (
+                <div
+                  key={member.id || idx}
+                  className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4 transition-all"
+                >
+                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-zinc-200/60">
+                    <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">
+                      Character #{idx + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSupportingCast((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                      className="text-xs font-medium text-rose-500 hover:text-rose-600 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 mb-1">
+                        Name <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={member.name}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSupportingCast((prev) =>
+                            prev.map((c, i) => (i === idx ? { ...c, name: val } : c)),
+                          );
+                        }}
+                        placeholder="e.g. Sarah"
+                        maxLength={30}
+                        className="w-full rounded-xl bg-white px-3 py-2 text-sm text-zinc-900 border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 mb-1">
+                        Role / Dynamic
+                      </label>
+                      <input
+                        type="text"
+                        value={member.role}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSupportingCast((prev) =>
+                            prev.map((c, i) => (i === idx ? { ...c, role: val } : c)),
+                          );
+                        }}
+                        placeholder="e.g. Partner detective, cynical best friend"
+                        maxLength={50}
+                        className="w-full rounded-xl bg-white px-3 py-2 text-sm text-zinc-900 border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                      Personality Quirks & Voice
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={member.description || ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSupportingCast((prev) =>
+                          prev.map((c, i) =>
+                            i === idx ? { ...c, description: val } : c,
+                          ),
+                        );
+                      }}
+                      placeholder="e.g. Sharp-tongued, observant, sips coffee constantly. Teases the main character."
+                      maxLength={300}
+                      className="w-full rounded-xl bg-white px-3 py-2 text-sm text-zinc-900 border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900 resize-none"
+                    />
+                  </div>
+
+                  <label className="mt-2.5 flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={member.inScene}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setSupportingCast((prev) =>
+                          prev.map((c, i) =>
+                            i === idx ? { ...c, inScene: checked } : c,
+                          ),
+                        );
+                      }}
+                      className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+                    />
+                    <span className="text-xs font-medium text-zinc-700">
+                      Starts in scene (present in the room / opening dialogue)
+                    </span>
+                  </label>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-zinc-200 p-6 text-center">
+              <p className="text-xs text-zinc-500">
+                No supporting characters yet. Add companions, pets, or rivals who can speak and react during the story.
+              </p>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              if (supportingCast.length >= 8) return;
+              setSupportingCast((prev) => [
+                ...prev,
+                {
+                  id: `cast-${Date.now()}`,
+                  name: "",
+                  role: "",
+                  description: "",
+                  inScene: true,
+                },
+              ]);
+            }}
+            disabled={supportingCast.length >= 8}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-2.5 text-xs font-semibold text-zinc-800 shadow-2xs hover:bg-zinc-50 transition disabled:opacity-50"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+            </svg>
+            Add Supporting Character ({supportingCast.length}/8)
+          </button>
         </FormSection>
 
         <FormSection

@@ -1,4 +1,5 @@
 import { getStoryMode, type StoryModeId } from "@/lib/story-modes";
+import type { SupportingCharacter } from "@/lib/character-validation";
 
 export interface CharacterPersona {
   name: string;
@@ -10,6 +11,7 @@ export interface CharacterPersona {
   profile: string;
   greeting?: string;
   background?: string | null;
+  supportingCast?: SupportingCharacter[];
 }
 
 export interface ChatHistoryMessage {
@@ -17,16 +19,26 @@ export interface ChatHistoryMessage {
   text: string;
 }
 
+export type CastTransition = {
+  characterName: string;
+  type: "exit" | "entrance";
+  reason?: string;
+};
+
 export interface GenerateCharacterResponseOptions {
   character: CharacterPersona;
   messages: ChatHistoryMessage[];
   model?: string;
   mode?: StoryModeId;
+  supportingCast?: SupportingCharacter[];
+  transitions?: CastTransition[];
 }
 
 export function buildSystemInstruction(
   character: CharacterPersona,
   modeId?: StoryModeId,
+  supportingCastOverride?: SupportingCharacter[],
+  transitions?: CastTransition[],
 ): string {
   const mode = getStoryMode(modeId);
   const traits = [
@@ -42,6 +54,81 @@ export function buildSystemInstruction(
     .filter(Boolean)
     .join("\n");
 
+  const cast = supportingCastOverride ?? character.supportingCast ?? [];
+  const inSceneCast = cast.filter((c) => c.inScene);
+  const offSceneCast = cast.filter((c) => !c.inScene);
+
+  let castSection = "";
+  if (cast.length > 0) {
+    const sections: string[] = [];
+    if (inSceneCast.length > 0) {
+      const list = inSceneCast
+        .map(
+          (c, idx) =>
+            `${idx + 1}. ${c.name} (${c.role || "Supporting character"})${
+              c.description ? `\n   - Details/Quirks: ${c.description}` : ""
+            }\n   - Status: PRESENT IN SCENE / ROOM`,
+        )
+        .join("\n");
+      sections.push(`[Present in Scene / Available for Interaction]:\n${list}`);
+    }
+    if (offSceneCast.length > 0) {
+      const list = offSceneCast
+        .map(
+          (c, idx) =>
+            `${idx + 1}. ${c.name} (${c.role || "Supporting character"})${
+              c.description ? `\n   - Details/Quirks: ${c.description}` : ""
+            }\n   - Status: OFF-SCREEN / NOT CURRENTLY PRESENT (known to ${character.name}, can be mentioned or enter if narratively sensible)`,
+        )
+        .join("\n");
+      sections.push(`[Known Supporting Characters (Off-Screen)]:\n${list}`);
+    }
+
+    castSection = `\n=== SUPPORTING CAST & RELATIONSHIPS ===\n${sections.join("\n\n")}\n`;
+  }
+
+  const multiCharacterGuidelines =
+    inSceneCast.length > 0
+      ? `\n=== MULTI-CHARACTER SCENE DIRECTING (CRUCIAL) ===
+1. You are roleplaying as ${character.name} (the lead), but you ALSO direct the scene and voice the supporting characters present in the scene.
+2. In your responses, include the actions, dialogue, banter, and reactions of the supporting characters who are present in the scene (${inSceneCast.map((c) => c.name).join(", ")}).
+3. Supporting character dialogue MUST be enclosed in standard double quotes with clear narrative tags (e.g. ${inSceneCast[0].name} scoffed, "Are you serious?" or ${character.name} turned as ${inSceneCast[0].name} stepped forward).
+4. Keep supporting characters distinct, true to their roles, and actively involved in the conversation or atmosphere.
+5. If the user addresses a supporting character directly or refers to them, have that supporting character reply and react naturally within your narrative response.`
+      : "";
+
+  let transitionSection = "";
+  if (transitions && transitions.length > 0) {
+    const exitDirectives = transitions
+      .filter((t) => t.type === "exit")
+      .map(
+        (t) =>
+          `- ${t.characterName} has just stepped away or left the scene.${
+            t.reason ? ` (Context/Reason: ${t.reason})` : ""
+          }\n  -> MANDATORY INSTRUCTION: Do NOT let them vanish without explanation. Early in this response, narrate a smooth, in-character departure or exit for ${
+            t.characterName
+          } (e.g., they excuse themselves, receive an urgent call, step out of the room, or walk away). After their departure scene, they are off-screen and should not speak or participate further.`,
+      );
+
+    const entranceDirectives = transitions
+      .filter((t) => t.type === "entrance")
+      .map(
+        (t) =>
+          `- ${t.characterName} has just arrived or entered the scene.${
+            t.reason ? ` (Context/Reason: ${t.reason})` : ""
+          }\n  -> MANDATORY INSTRUCTION: Narrate ${
+            t.characterName
+          }'s entrance naturally into the current setting (e.g., knocking, stepping through the doorway, joining the table, or calling out) before having them speak or interact with the others.`,
+      );
+
+    const parts = [...exitDirectives, ...entranceDirectives];
+    if (parts.length > 0) {
+      transitionSection = `\n=== IMMEDIATE SCENE TRANSITION DIRECTIVE (EXECUTE THIS TURN) ===\n${parts.join(
+        "\n\n",
+      )}\n`;
+    }
+  }
+
   return `You are roleplaying as the following character in an interactive story / conversation:
 
 === CHARACTER DOSSIER ===
@@ -50,11 +137,10 @@ ${traits}
 === PUBLIC PROFILE & PERSONALITY ===
 ${character.profile}
 
-${character.background ? `=== BACKSTORY & SECRET KNOWLEDGE ===\n${character.background}\n` : ""}
-${character.greeting ? `=== INITIAL OPENING GREETING ===\n"${character.greeting}"\n` : ""}
-
+${character.background ? `=== BACKSTORY & SECRET KNOWLEDGE ===\n${character.background}\n` : ""}${castSection}
+${character.greeting ? `=== INITIAL OPENING GREETING ===\n"${character.greeting}"\n` : ""}${transitionSection}
 === STORYTELLING MODE GUIDELINE ===
-${mode.systemPromptGuideline}
+${mode.systemPromptGuideline}${multiCharacterGuidelines}
 
 === ROLEPLAY INSTRUCTIONS ===
 1. STAY COMPLETELY IN CHARACTER at all times. Never refer to yourself as an AI, Gemini, Google, or a language model.
@@ -90,6 +176,8 @@ export async function generateCharacterResponse({
   messages,
   model = process.env.GEMINI_MODEL || "gemini-3.5-flash",
   mode,
+  supportingCast,
+  transitions,
 }: GenerateCharacterResponseOptions): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -99,7 +187,12 @@ export async function generateCharacterResponse({
   }
 
   const storyMode = getStoryMode(mode);
-  const systemInstruction = buildSystemInstruction(character, mode);
+  const systemInstruction = buildSystemInstruction(
+    character,
+    mode,
+    supportingCast,
+    transitions,
+  );
 
   // Convert chat messages to Gemini's contents format
   // Gemini expects roles: "user" | "model"

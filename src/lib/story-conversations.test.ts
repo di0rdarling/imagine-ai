@@ -73,13 +73,24 @@ describe("story-conversations repository", () => {
     expect(result).toEqual(doc);
   });
 
-  it("resets conversation by deleting user conversation record", async () => {
+  it("resets conversation by clearing messages while preserving supporting cast", async () => {
     const characterId = new ObjectId();
     const userId = new ObjectId();
-    deleteOne.mockResolvedValue({ acknowledged: true });
+    updateOne.mockResolvedValue({ acknowledged: true });
 
     const success = await resetConversation(characterId, userId);
     expect(success).toBe(true);
-    expect(deleteOne).toHaveBeenCalledWith({ characterId, userId });
+    expect(deleteOne).not.toHaveBeenCalled();
+    expect(updateOne).toHaveBeenCalledWith(
+      { characterId, userId },
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          messages: [],
+        }),
+      }),
+    );
+    const setPayload = updateOne.mock.calls[0][1].$set;
+    expect(setPayload).not.toHaveProperty("supportingCast");
+    expect(setPayload).not.toHaveProperty("mode");
   });
 });

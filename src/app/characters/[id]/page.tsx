@@ -62,12 +62,16 @@ async function CharacterDetailContent({ params }: CharacterPageProps) {
     text: string;
   }> | null = null;
   let initialMode: StoryModeId | undefined = undefined;
+  let initialCast = character.supportingCast ?? [];
 
   if (session?.user?.id) {
     const saved = await getConversation(character._id, session.user.id);
     if (saved) {
       if (saved.mode) {
         initialMode = saved.mode;
+      }
+      if (saved.supportingCast !== undefined) {
+        initialCast = saved.supportingCast;
       }
       if (saved.messages && saved.messages.length > 0) {
         initialMessages = saved.messages.map((m) => ({
@@ -96,10 +100,12 @@ async function CharacterDetailContent({ params }: CharacterPageProps) {
         visibility: character.visibility,
         createdAt: character.createdAt.toISOString(),
         isOwner,
+        supportingCast: character.supportingCast ?? [],
       }}
       userName={session?.user?.name || null}
       initialMessages={initialMessages}
       initialMode={initialMode}
+      initialCast={initialCast}
     />
   );
 }

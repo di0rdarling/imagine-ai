@@ -53,4 +53,77 @@ describe("buildSystemInstruction", () => {
     expect(prompt).not.toContain("Height:");
     expect(prompt).not.toContain("BACKSTORY");
   });
+
+  it("includes supporting cast and multi-character scene directions when cast is present", () => {
+    const characterWithCast: CharacterPersona = {
+      ...sampleCharacter,
+      supportingCast: [
+        {
+          id: "cast-1",
+          name: "Vance Senior",
+          role: "Veteran Commander",
+          description: "Gruff mentor who doubts Astra's navigational instincts",
+          inScene: true,
+        },
+        {
+          id: "cast-2",
+          name: "Circuit",
+          role: "Ship Maintenance Bot",
+          description: "Anxious droid",
+          inScene: false,
+        },
+      ],
+    };
+
+    const prompt = buildSystemInstruction(characterWithCast);
+    expect(prompt).toContain("=== SUPPORTING CAST & RELATIONSHIPS ===");
+    expect(prompt).toContain("Vance Senior (Veteran Commander)");
+    expect(prompt).toContain("PRESENT IN SCENE / ROOM");
+    expect(prompt).toContain("Circuit (Ship Maintenance Bot)");
+    expect(prompt).toContain("OFF-SCREEN / NOT CURRENTLY PRESENT");
+    expect(prompt).toContain("=== MULTI-CHARACTER SCENE DIRECTING (CRUCIAL) ===");
+    expect(prompt).toContain("Vance Senior");
+  });
+
+  it("injects mandatory exit and entrance directives when scene transitions are provided", () => {
+    const prompt = buildSystemInstruction(
+      sampleCharacter,
+      "story",
+      [
+        {
+          id: "cast-1",
+          name: "Sarah",
+          role: "Detective",
+          inScene: false,
+        },
+        {
+          id: "cast-2",
+          name: "Toby",
+          role: "Forensics Tech",
+          inScene: true,
+        },
+      ],
+      [
+        {
+          characterName: "Sarah",
+          type: "exit",
+          reason: "Received an urgent radio call from precinct",
+        },
+        {
+          characterName: "Toby",
+          type: "entrance",
+          reason: "Knocks and rushes in with lab results",
+        },
+      ],
+    );
+
+    expect(prompt).toContain("=== IMMEDIATE SCENE TRANSITION DIRECTIVE (EXECUTE THIS TURN) ===");
+    expect(prompt).toContain("Sarah has just stepped away or left the scene");
+    expect(prompt).toContain("Received an urgent radio call from precinct");
+    expect(prompt).toContain("Do NOT let them vanish without explanation");
+    expect(prompt).toContain("narrate a smooth, in-character departure or exit for Sarah");
+    expect(prompt).toContain("Toby has just arrived or entered the scene");
+    expect(prompt).toContain("Knocks and rushes in with lab results");
+    expect(prompt).toContain("Narrate Toby's entrance naturally");
+  });
 });
