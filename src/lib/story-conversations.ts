@@ -1,5 +1,6 @@
 import { ObjectId, type Collection } from "mongodb";
 import { getDb } from "@/lib/mongodb";
+import type { StoryModeId } from "@/lib/story-modes";
 
 export type StoredChatMessage = {
   id: string;
@@ -12,6 +13,7 @@ export type StoryConversationDocument = {
   _id: ObjectId;
   characterId: ObjectId;
   userId: ObjectId;
+  mode?: StoryModeId;
   messages: StoredChatMessage[];
   createdAt: Date;
   updatedAt: Date;
@@ -66,6 +68,7 @@ export async function saveConversationMessages(
     sender: "character" | "user";
     text: string;
   }>,
+  mode?: StoryModeId,
 ): Promise<boolean> {
   try {
     const charObjectId =
@@ -82,15 +85,54 @@ export async function saveConversationMessages(
       createdAt: now,
     }));
 
+    const updateFields: Record<string, unknown> = {
+      messages: storedMessages,
+      updatedAt: now,
+    };
+    if (mode) {
+      updateFields.mode = mode;
+    }
+
+    await collection.updateOne(
+      { characterId: charObjectId, userId: userObjectId },
+      {
+        $set: updateFields,
+        $setOnInsert: {
+          _id: new ObjectId(),
+          createdAt: now,
+        },
+      },
+      { upsert: true },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function updateConversationMode(
+  characterId: string | ObjectId,
+  userId: string | ObjectId,
+  mode: StoryModeId,
+): Promise<boolean> {
+  try {
+    const charObjectId =
+      typeof characterId === "string" ? new ObjectId(characterId) : characterId;
+    const userObjectId =
+      typeof userId === "string" ? new ObjectId(userId) : userId;
+    const collection = await conversationsCollection();
+    const now = new Date();
+
     await collection.updateOne(
       { characterId: charObjectId, userId: userObjectId },
       {
         $set: {
-          messages: storedMessages,
+          mode,
           updatedAt: now,
         },
         $setOnInsert: {
           _id: new ObjectId(),
+          messages: [],
           createdAt: now,
         },
       },

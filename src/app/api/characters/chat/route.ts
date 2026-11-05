@@ -7,10 +7,13 @@ import { generateCharacterResponse } from "@/lib/gemini";
 import {
   resetConversation,
   saveConversationMessages,
+  updateConversationMode,
 } from "@/lib/story-conversations";
+import { type StoryModeId } from "@/lib/story-modes";
 
 interface ChatRequestBody {
   characterId: string;
+  mode?: StoryModeId;
   messages: Array<{
     id?: string;
     sender: "character" | "user";
@@ -65,6 +68,7 @@ export async function POST(request: Request) {
         background: character.background,
       },
       messages: body.messages,
+      mode: body.mode,
     });
 
     const fullMessages = [
@@ -80,13 +84,46 @@ export async function POST(request: Request) {
       },
     ];
 
-    // Persist conversation to MongoDB
-    await saveConversationMessages(character._id, session.user.id, fullMessages);
+    // Persist conversation to MongoDB (including the active mode)
+    await saveConversationMessages(
+      character._id,
+      session.user.id,
+      fullMessages,
+      body.mode,
+    );
 
     return NextResponse.json({ reply });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to generate character response.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = (await request.json().catch(() => null)) as {
+      characterId?: string;
+      mode?: StoryModeId;
+    } | null;
+
+    if (!body?.characterId || !body?.mode) {
+      return NextResponse.json(
+        { error: "characterId and mode are required" },
+        { status: 400 },
+      );
+    }
+
+    await updateConversationMode(body.characterId, session.user.id, body.mode);
+    return NextResponse.json({ success: true, mode: body.mode });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to update mode.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

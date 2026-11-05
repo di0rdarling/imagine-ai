@@ -72,9 +72,9 @@ describe("tokenizeParagraph", () => {
     const tokens = tokenizeParagraph(input);
 
     expect(tokens).toEqual([
-      { type: "text", text: "I pick up my phone and laugh, " },
+      { type: "narration", text: "I pick up my phone and laugh, " },
       { type: "dialogue", text: "I'm awake!" },
-      { type: "text", text: " I type." },
+      { type: "narration", text: " I type." },
     ]);
   });
 });
@@ -103,5 +103,25 @@ I pick up my phone and laugh, "I'm awake!" I type.`;
     expect(blocks[0].kind).toBe("standalone_action");
     expect(blocks[1].kind).toBe("standalone_dialogue");
     expect(blocks[2].kind).toBe("mixed_paragraph");
+  });
+
+  it("handles prose with dialogue and narration like screenshot", () => {
+    const input = `She lets out a dramatic groan. "And for the record, yes." She looks over.`;
+    const blocks = parseStoryParagraphs(input);
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].kind).toBe("mixed_paragraph");
+    expect(blocks[0].tokens[0].type).toBe("narration");
+    expect(blocks[0].tokens[1].type).toBe("dialogue");
+    expect(blocks[0].tokens[2].type).toBe("narration");
+  });
+
+  it("handles asterisk-wrapped quotes without breaking dialogue classification", () => {
+    const input = `*"If you were asleep, I'd be calling you,"* her next text arrives.`;
+    const blocks = parseStoryParagraphs(input);
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].kind).toBe("mixed_paragraph");
+    expect(blocks[0].tokens.some((t) => t.type === "dialogue")).toBe(true);
   });
 });

@@ -28,6 +28,13 @@ describe("buildSystemInstruction", () => {
     expect(prompt).toContain("All systems nominal. Where are we heading next?");
     expect(prompt).toContain("STAY COMPLETELY IN CHARACTER");
     expect(prompt).toContain("UNDERSTANDING USER INPUT");
+    expect(prompt).toContain("CURRENT ACTIVE MODE: STORY MODE");
+  });
+
+  it("applies specific mode instructions when provided", () => {
+    const prompt = buildSystemInstruction(sampleCharacter, "casual");
+    expect(prompt).toContain("CURRENT ACTIVE MODE: CASUAL MODE");
+    expect(prompt).toContain("Keep responses concise, playful, snappy");
   });
 
   it("handles characters without optional fields gracefully", () => {

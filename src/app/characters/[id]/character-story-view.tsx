@@ -9,6 +9,13 @@ import { DeleteCharacterButton } from "@/app/characters/delete-character-button"
 import { Button, ConfirmDialog, Input } from "@/components/ui";
 import { parseStoryParagraphs, type StoryParagraphBlock } from "@/lib/story-formatter";
 
+import {
+  DEFAULT_STORY_MODE,
+  getStoryMode,
+  STORY_MODES,
+  type StoryModeId,
+} from "@/lib/story-modes";
+
 export type SerializedCharacter = {
   id: string;
   name: string;
@@ -34,6 +41,7 @@ interface CharacterStoryViewProps {
     sender: "character" | "user";
     text: string;
   }> | null;
+  initialMode?: StoryModeId;
 }
 
 type ChatMessage = {
@@ -56,6 +64,7 @@ export function CharacterStoryView({
   character,
   userName,
   initialMessages,
+  initialMode,
 }: CharacterStoryViewProps) {
   const router = useRouter();
   const { data: session } = useSession();
@@ -65,6 +74,10 @@ export function CharacterStoryView({
   const displayName = userName || session?.user?.name || "You";
 
   const [activeTab, setActiveTab] = useState<"story" | "info">("story");
+  const [currentMode, setCurrentMode] = useState<StoryModeId>(
+    () => initialMode || DEFAULT_STORY_MODE,
+  );
+  const [showModeModal, setShowModeModal] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (initialMessages && initialMessages.length > 0) {
       return initialMessages;
@@ -76,6 +89,8 @@ export function CharacterStoryView({
   const [chatError, setChatError] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showStoryGuideModal, setShowStoryGuideModal] = useState(false);
+
+  const activeModeOption = getStoryMode(currentMode);
 
   const hasConversation = messages.some((message) => message.sender === "user");
 
@@ -114,6 +129,25 @@ export function CharacterStoryView({
     }
   };
 
+  const handleSelectMode = async (modeId: StoryModeId) => {
+    setCurrentMode(modeId);
+    setShowModeModal(false);
+
+    // Save chosen mode to database in the background
+    try {
+      await fetch("/api/characters/chat", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          characterId: character.id,
+          mode: modeId,
+        }),
+      });
+    } catch {
+      // Non-blocking background sync
+    }
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const userText = inputMessage.trim();
@@ -145,6 +179,7 @@ export function CharacterStoryView({
         },
         body: JSON.stringify({
           characterId: character.id,
+          mode: currentMode,
           messages: nextMessages.map((m) => ({
             sender: m.sender,
             text: m.text,
@@ -204,6 +239,13 @@ export function CharacterStoryView({
         onClose={() => setShowStoryGuideModal(false)}
       />
 
+      <StoryModeModal
+        open={showModeModal}
+        selectedMode={currentMode}
+        onSelectMode={handleSelectMode}
+        onClose={() => setShowModeModal(false)}
+      />
+
       {/* Top Header Bar spanning full width */}
       <header className="shrink-0 border-b border-zinc-200/80 bg-white px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -259,6 +301,32 @@ export function CharacterStoryView({
 
           {/* Right: Tab Navigation + Action Buttons */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Story Mode Selector Trigger (Matching mobile pill in screenshot) */}
+            <button
+              type="button"
+              onClick={() => setShowModeModal(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 transition"
+              title="Change Storytelling Mode"
+            >
+              <span>{activeModeOption.icon}</span>
+              <span className="hidden sm:inline font-medium text-zinc-800">
+                {activeModeOption.title}
+              </span>
+              <svg
+                className="h-3.5 w-3.5 text-zinc-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2.5"
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </button>
+
             {/* Story Guide Help Button */}
             <button
               type="button"
@@ -498,16 +566,28 @@ export function CharacterStoryView({
                 </Button>
               </form>
 
+              {/* Story mode badge above input bar */}
               <div className="flex items-center justify-between px-1 text-[11px] text-zinc-400">
-                <span>
-                  Tip: Write naturally like a novel (e.g. <span className="text-zinc-600 italic">I laugh, &quot;I&apos;m awake!&quot; I type</span>) or use <code className="rounded bg-zinc-100 px-1 py-0.5 text-zinc-600">*actions*</code> and <code className="rounded bg-zinc-100 px-1 py-0.5 text-zinc-600">&quot;quotes&quot;</code>.
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-zinc-500">Mode:</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowModeModal(true)}
+                    className="inline-flex items-center gap-1 font-semibold text-zinc-700 hover:text-zinc-950 underline"
+                  >
+                    <span>{activeModeOption.icon}</span>
+                    <span>{activeModeOption.title}</span>
+                  </button>
+                  <span className="hidden sm:inline text-zinc-400">
+                    — {activeModeOption.replyLength}
+                  </span>
+                </div>
                 <button
                   type="button"
                   onClick={() => setShowStoryGuideModal(true)}
                   className="underline hover:text-zinc-600 transition shrink-0 ml-2"
                 >
-                  Formatting guide
+                  Writing guide
                 </button>
               </div>
             </div>
@@ -625,10 +705,8 @@ function StoryMessageContent({
           return (
             <p
               key={pIdx}
-              className={`text-sm leading-relaxed font-sans ${
-                isCharacter
-                  ? "text-zinc-900 font-medium"
-                  : "text-zinc-100 font-medium"
+              className={`text-sm leading-relaxed font-sans font-medium ${
+                isCharacter ? "text-zinc-900" : "text-white"
               }`}
             >
               <span className={isCharacter ? "text-indigo-600 font-bold mr-0.5" : "text-indigo-300 font-bold mr-0.5"}>
@@ -649,7 +727,7 @@ function StoryMessageContent({
             <p
               key={pIdx}
               className={`text-sm leading-relaxed font-serif italic ${
-                isCharacter ? "text-zinc-600" : "text-zinc-300"
+                isCharacter ? "text-purple-700" : "text-purple-300"
               }`}
             >
               *{actionText}*
@@ -657,25 +735,18 @@ function StoryMessageContent({
           );
         }
 
-        // Novel-style mixed paragraph (e.g. `I pick up my phone and laugh, "I'm awake!" I type.`)
+        // Novel-style mixed paragraph (e.g. `She lets out a groan... "And for the record, yes."`)
         if (block.kind === "mixed_paragraph") {
           return (
-            <p
-              key={pIdx}
-              className={`text-sm leading-relaxed ${
-                isCharacter ? "text-zinc-800" : "text-zinc-200"
-              }`}
-            >
+            <p key={pIdx} className="text-sm leading-relaxed">
               {block.tokens.map((tok, tIdx) => {
                 if (tok.type === "dialogue") {
                   return (
                     <span
                       key={tIdx}
-                      className={
-                        isCharacter
-                          ? "font-medium text-zinc-900"
-                          : "font-medium text-white"
-                      }
+                      className={`font-sans font-medium ${
+                        isCharacter ? "text-zinc-900" : "text-white"
+                      }`}
                     >
                       <span className={isCharacter ? "text-indigo-600 font-bold" : "text-indigo-300 font-bold"}>
                         &ldquo;
@@ -693,7 +764,7 @@ function StoryMessageContent({
                     <span
                       key={tIdx}
                       className={`font-serif italic ${
-                        isCharacter ? "text-zinc-600" : "text-zinc-300"
+                        isCharacter ? "text-purple-700" : "text-purple-300"
                       }`}
                     >
                       *{tok.text}*
@@ -701,18 +772,28 @@ function StoryMessageContent({
                   );
                 }
 
-                return <span key={tIdx}>{tok.text}</span>;
+                // Regular narration / action clause outside quotes
+                return (
+                  <span
+                    key={tIdx}
+                    className={`font-serif italic ${
+                      isCharacter ? "text-purple-700" : "text-purple-300"
+                    }`}
+                  >
+                    {tok.text}
+                  </span>
+                );
               })}
             </p>
           );
         }
 
-        // Untagged ambient / narrative text (e.g. first greeting paragraph)
+        // Pure descriptive narration paragraph without dialogue (e.g. the middle paragraph in your screenshot)
         return (
           <p
             key={pIdx}
             className={`text-sm leading-relaxed font-serif italic ${
-              isCharacter ? "text-zinc-600" : "text-zinc-300"
+              isCharacter ? "text-purple-700" : "text-purple-300"
             }`}
           >
             {block.rawText}
@@ -857,6 +938,130 @@ function StoryGuideModal({
             className="rounded-full px-6"
           >
             Got it, let&apos;s write
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StoryModeModal({
+  open,
+  selectedMode,
+  onSelectMode,
+  onClose,
+}: {
+  open: boolean;
+  selectedMode: StoryModeId;
+  onSelectMode: (mode: StoryModeId) => void;
+  onClose: () => void;
+}) {
+  const [tentativeMode, setTentativeMode] = useState<StoryModeId>(selectedMode);
+
+  useEffect(() => {
+    if (open) {
+      setTentativeMode(selectedMode);
+    }
+  }, [open, selectedMode]);
+
+  if (!open) return null;
+
+  const modeList = Object.values(STORY_MODES);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-0 sm:p-4"
+      role="presentation"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
+        aria-label="Dismiss modal"
+        onClick={onClose}
+      />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="choose-mode-title"
+        className="relative flex w-full max-w-md flex-col overflow-hidden rounded-t-[32px] sm:rounded-3xl border border-zinc-200 bg-white shadow-2xl text-zinc-900 [color-scheme:light] animate-in fade-in slide-in-from-bottom-4 duration-200"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 pt-5 pb-3">
+          <div className="w-6" /> {/* Spacer for optical balance */}
+          <h2 id="choose-mode-title" className="text-lg font-bold text-zinc-900">
+            Choose a Mode
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Mode List Options */}
+        <div className="flex flex-col gap-2.5 px-4 sm:px-6 py-2">
+          {modeList.map((mode) => {
+            const isSelected = tentativeMode === mode.id;
+            return (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => setTentativeMode(mode.id)}
+                className={`flex items-center justify-between gap-3 rounded-2xl p-3.5 text-left transition border-2 ${
+                  isSelected
+                    ? "border-pink-500 bg-pink-50/20 shadow-xs"
+                    : "border-zinc-100 bg-[#f8f9fa] hover:border-zinc-200 hover:bg-zinc-100/60"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white border border-zinc-200/80 text-xl shadow-2xs">
+                    {mode.icon}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-sm text-zinc-900">{mode.title}</h3>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-pink-50 border border-pink-200/80 px-2 py-0.5 text-[10px] font-semibold text-pink-700">
+                        <span>💎</span>
+                        <span>{mode.badge}</span>
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-zinc-500 line-clamp-2 leading-relaxed">
+                      {mode.description}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Radio checkmark circle (styled like the screenshot) */}
+                <div className="shrink-0 pl-1">
+                  {isSelected ? (
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-pink-500 text-white shadow-xs">
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                  ) : (
+                    <div className="h-6 w-6 rounded-full border-2 border-zinc-300" />
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Confirm Footer */}
+        <div className="px-4 sm:px-6 py-4 pt-3">
+          <Button
+            type="button"
+            size="lg"
+            fullWidth
+            onClick={() => onSelectMode(tentativeMode)}
+            className="rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800"
+          >
+            Confirm
           </Button>
         </div>
       </div>

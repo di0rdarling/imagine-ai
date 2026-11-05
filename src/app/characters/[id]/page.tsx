@@ -6,6 +6,7 @@ import type { Metadata } from "next";
 import { authOptions } from "@/lib/auth";
 import { getCharacterById } from "@/lib/characters";
 import { getConversation } from "@/lib/story-conversations";
+import { type StoryModeId } from "@/lib/story-modes";
 import { CharacterStoryView } from "./character-story-view";
 
 interface CharacterPageProps {
@@ -60,15 +61,21 @@ async function CharacterDetailContent({ params }: CharacterPageProps) {
     sender: "character" | "user";
     text: string;
   }> | null = null;
+  let initialMode: StoryModeId | undefined = undefined;
 
   if (session?.user?.id) {
     const saved = await getConversation(character._id, session.user.id);
-    if (saved && saved.messages && saved.messages.length > 0) {
-      initialMessages = saved.messages.map((m) => ({
-        id: m.id,
-        sender: m.sender,
-        text: m.text,
-      }));
+    if (saved) {
+      if (saved.mode) {
+        initialMode = saved.mode;
+      }
+      if (saved.messages && saved.messages.length > 0) {
+        initialMessages = saved.messages.map((m) => ({
+          id: m.id,
+          sender: m.sender,
+          text: m.text,
+        }));
+      }
     }
   }
 
@@ -92,6 +99,7 @@ async function CharacterDetailContent({ params }: CharacterPageProps) {
       }}
       userName={session?.user?.name || null}
       initialMessages={initialMessages}
+      initialMode={initialMode}
     />
   );
 }

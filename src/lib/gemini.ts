@@ -1,3 +1,5 @@
+import { getStoryMode, type StoryModeId } from "@/lib/story-modes";
+
 export interface CharacterPersona {
   name: string;
   age: string;
@@ -19,9 +21,14 @@ export interface GenerateCharacterResponseOptions {
   character: CharacterPersona;
   messages: ChatHistoryMessage[];
   model?: string;
+  mode?: StoryModeId;
 }
 
-export function buildSystemInstruction(character: CharacterPersona): string {
+export function buildSystemInstruction(
+  character: CharacterPersona,
+  modeId?: StoryModeId,
+): string {
+  const mode = getStoryMode(modeId);
   const traits = [
     `Name: ${character.name}`,
     `Occupation/Role: ${character.occupation}`,
@@ -46,6 +53,9 @@ ${character.profile}
 ${character.background ? `=== BACKSTORY & SECRET KNOWLEDGE ===\n${character.background}\n` : ""}
 ${character.greeting ? `=== INITIAL OPENING GREETING ===\n"${character.greeting}"\n` : ""}
 
+=== STORYTELLING MODE GUIDELINE ===
+${mode.systemPromptGuideline}
+
 === ROLEPLAY INSTRUCTIONS ===
 1. STAY COMPLETELY IN CHARACTER at all times. Never refer to yourself as an AI, Gemini, Google, or a language model.
 2. Embody the character's voice, tone, vocabulary, attitude, and quirks described in their profile and background.
@@ -59,13 +69,16 @@ ${character.greeting ? `=== INITIAL OPENING GREETING ===\n"${character.greeting}
      c) Pure dialogue, stage directions, or environmental scene narration.
    - Comprehend both what the user is saying aloud AND what their character is physically doing, feeling, typing, or observing in the scene, and react realistically to both words and actions.
 4. FORMATTING & NARRATIVE STYLE (CRUCIAL):
-   - Write like a published author in rich, descriptive narrative paragraphs.
-   - Blend dialogue, physical actions, and scene descriptions into fluid prose rather than separate bullet-point lines.
-   - Put all spoken dialogue inside double quotation marks (e.g. "What are you doing here?").
-   - You may write character actions and expressions either in natural novel prose or enclosed in asterisks (e.g. *smirking as she reaches for the door*), but do NOT place heavy separate callouts or endless bulleted lists.
-   - Do NOT wrap spoken dialogue inside asterisks.
+   - Write standard published fiction prose.
+   - Any words spoken aloud or sent as text messages by the character MUST be enclosed in standard double quotation marks (e.g. "What are you doing here?").
+   - NEVER wrap quotation marks around asterisks, and NEVER wrap asterisks around quotation marks (e.g. do NOT write *"dialogue"* or "*dialogue*").
+   - Do NOT wrap dialogue inside asterisks.
+   - Character actions, movement, expressions, phone descriptions, and narrative scenery should simply be written as clean descriptive prose without asterisks.
+   - Example of correct output:
+     She lets out a soft sigh and glances down at her phone. "Are you still awake?" she texts back, waiting eagerly. A photo follows: a snapshot of the rainy street outside her window.
 5. Keep replies natural, engaging, and attuned to the pace of a roleplay or conversation. Do not write endless essays unless the scene demands a lengthy monologue.
-6. React directly to what the user says and does, and push the story or interaction forward.`;
+6. React directly to what the user says and does, and push the story or interaction forward.
+7. Always bring your sentences and thoughts to a clean, natural close. Never cut off or terminate mid-sentence.`;
 }
 
 /**
@@ -76,6 +89,7 @@ export async function generateCharacterResponse({
   character,
   messages,
   model = process.env.GEMINI_MODEL || "gemini-3.5-flash",
+  mode,
 }: GenerateCharacterResponseOptions): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -84,7 +98,8 @@ export async function generateCharacterResponse({
     );
   }
 
-  const systemInstruction = buildSystemInstruction(character);
+  const storyMode = getStoryMode(mode);
+  const systemInstruction = buildSystemInstruction(character, mode);
 
   // Convert chat messages to Gemini's contents format
   // Gemini expects roles: "user" | "model"
@@ -138,7 +153,7 @@ export async function generateCharacterResponse({
     generationConfig: {
       temperature: 0.85,
       topP: 0.95,
-      maxOutputTokens: 1024,
+      maxOutputTokens: storyMode.maxTokens,
     },
   };
 
@@ -166,9 +181,19 @@ export async function generateCharacterResponse({
 
   const data = await response.json();
   const candidate = data?.candidates?.[0];
-  const responsePart = candidate?.content?.parts?.[0]?.text;
 
-  if (!responsePart || typeof responsePart !== "string") {
+  // Extract all text parts, excluding internal thought/reasoning tokens if present
+  const parts = candidate?.content?.parts;
+  let fullText = "";
+
+  if (Array.isArray(parts)) {
+    fullText = parts
+      .filter((p: { text?: string; thought?: boolean }) => Boolean(p.text && !p.thought))
+      .map((p: { text: string }) => p.text)
+      .join("");
+  }
+
+  if (!fullText.trim()) {
     // If finishReason is blocked or empty
     if (candidate?.finishReason && candidate.finishReason !== "STOP") {
       throw new Error(`Gemini response stopped with reason: ${candidate.finishReason}`);
@@ -176,5 +201,21 @@ export async function generateCharacterResponse({
     throw new Error("Received empty response from Gemini.");
   }
 
-  return responsePart.trim();
+  let trimmed = fullText.trim();
+
+  // Strip accidental asterisk-wrapped quotes like *"hello"* or "*hello*" -> "hello"
+  trimmed = trimmed.replace(/\*["“]([^"”]+)["”]\*/g, '"$1"');
+  trimmed = trimmed.replace(/["“]\*([^*]+)\*["”]/g, '"$1"');
+
+  // Balance unclosed quotes or asterisks if ever truncated
+  const doubleQuotes = (trimmed.match(/"/g) || []).length;
+  if (doubleQuotes % 2 !== 0) {
+    trimmed += '"';
+  }
+  const asterisks = (trimmed.match(/\*/g) || []).length;
+  if (asterisks % 2 !== 0) {
+    trimmed += "*";
+  }
+
+  return trimmed;
 }
