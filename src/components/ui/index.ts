@@ -7,6 +7,7 @@ export {
   type CharCountTextareaProps,
 } from "./char-count-field";
 export { CheckboxField } from "./checkbox-field";
+export { ConfirmDialog, type ConfirmDialogProps } from "./confirm-dialog";
 export { CheckIndicator } from "./check-indicator";
 export { ChoiceCard } from "./choice-card";
 export { FieldError } from "./field-error";

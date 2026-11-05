@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { DeleteCharacterButton } from "@/app/characters/delete-character-button";
-import { Button, Input } from "@/components/ui";
+import { Button, ConfirmDialog, Input } from "@/components/ui";
 
 export type SerializedCharacter = {
   id: string;
@@ -34,19 +34,48 @@ type ChatMessage = {
   text: string;
 };
 
-export function CharacterStoryView({ character }: CharacterStoryViewProps) {
-  const router = useRouter();
-
-  const [activeTab, setActiveTab] = useState<"story" | "info">("story");
-  const [messages, setMessages] = useState<ChatMessage[]>([
+function createInitialMessages(greeting: string): ChatMessage[] {
+  return [
     {
       id: "greeting",
       sender: "character",
-      text: character.greeting,
+      text: greeting,
     },
-  ]);
+  ];
+}
+
+export function CharacterStoryView({ character }: CharacterStoryViewProps) {
+  const router = useRouter();
+  const replyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [activeTab, setActiveTab] = useState<"story" | "info">("story");
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    createInitialMessages(character.greeting),
+  );
   const [inputMessage, setInputMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  const hasConversation = messages.some((message) => message.sender === "user");
+
+  useEffect(() => {
+    return () => {
+      if (replyTimeoutRef.current) {
+        clearTimeout(replyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleResetConversation = () => {
+    if (replyTimeoutRef.current) {
+      clearTimeout(replyTimeoutRef.current);
+      replyTimeoutRef.current = null;
+    }
+    setIsTyping(false);
+    setInputMessage("");
+    setMessages(createInitialMessages(character.greeting));
+    setShowResetConfirm(false);
+  };
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,8 +92,12 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
     setInputMessage("");
     setIsTyping(true);
 
+    if (replyTimeoutRef.current) {
+      clearTimeout(replyTimeoutRef.current);
+    }
+
     // Dynamic story simulation response based on character personality
-    setTimeout(() => {
+    replyTimeoutRef.current = setTimeout(() => {
       let reply = "";
       if (userText.toLowerCase().includes("hello") || userText.toLowerCase().includes("hi")) {
         reply = `*nods acknowledgingly* Good to meet you. In this world, we have to stay alert. What brings you here?`;
@@ -83,11 +116,27 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
         },
       ]);
       setIsTyping(false);
+      replyTimeoutRef.current = null;
     }, 900);
   };
 
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-2xl text-zinc-900 [color-scheme:light]">
+      <ConfirmDialog
+        open={showResetConfirm}
+        title="Reset story conversation?"
+        description={
+          <>
+            This will permanently erase your entire chat with{" "}
+            <span className="font-semibold text-zinc-900">{character.name}</span> and
+            restart from their opening greeting. This action cannot be undone.
+          </>
+        }
+        confirmLabel="Reset conversation"
+        cancelLabel="Keep chatting"
+        onConfirm={handleResetConversation}
+        onCancel={() => setShowResetConfirm(false)}
+      />
       {/* Top Bar */}
       <div className="mb-4 flex items-center justify-between">
         <Link
@@ -187,6 +236,25 @@ export function CharacterStoryView({ character }: CharacterStoryViewProps) {
         {/* Content Tabs */}
         {activeTab === "story" ? (
           <div className="mt-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-3 px-1">
+              <p className="text-xs font-medium text-zinc-500">
+                {hasConversation
+                  ? `${messages.length} message${messages.length === 1 ? "" : "s"} in this story`
+                  : "Start the story with your first message"}
+              </p>
+              {hasConversation ? (
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => setShowResetConfirm(true)}
+                  disabled={isTyping}
+                >
+                  Reset conversation
+                </Button>
+              ) : null}
+            </div>
+
             {/* Story Chat Stream */}
             <div className="flex flex-col gap-3 min-h-[300px] max-h-[480px] overflow-y-auto p-2 bg-[#f8f9fa] rounded-2xl">
               {messages.map((msg) => {
