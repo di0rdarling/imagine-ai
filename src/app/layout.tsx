@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const APP_NAME = "A-Star Technologies";
-const APP_DESCRIPTION = "Technology that reaches for the stars.";
+const APP_NAME = "Imagine AI";
+const APP_DESCRIPTION = "AI-driven interactive storytelling. Create characters and converse within rich dynamic worlds.";
 
 export const metadata: Metadata = {
   applicationName: APP_NAME,
@@ -43,6 +43,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#000000" },

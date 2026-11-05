@@ -6,6 +6,7 @@ import { signIn } from "next-auth/react";
 import { useState } from "react";
 
 import { signUp } from "@/app/sign-up/actions";
+import { Alert, AuthFormField, Button, Input } from "@/components/ui";
 
 type SubmitStatus = "idle" | "creating" | "signing-in";
 
@@ -56,80 +57,64 @@ export function SignUpForm() {
 
   return (
     <form onSubmit={handleSubmit} className="flex w-full max-w-md flex-col gap-4">
-      {error ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Alert tone="error">{error}</Alert> : null}
 
       {status === "signing-in" ? (
-        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-          Account created. Signing you in…
-        </p>
+        <Alert tone="success">Account created. Signing you in…</Alert>
       ) : null}
 
-      <label className="flex flex-col gap-2 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Name</span>
-        <input
+      <AuthFormField id="sign-up-name" label="Name">
+        <Input
+          id="sign-up-name"
           name="name"
           type="text"
           autoComplete="name"
           disabled={isBusy}
-          className="h-11 rounded-lg border border-zinc-300 bg-white px-3 text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
         />
-      </label>
+      </AuthFormField>
 
-      <label className="flex flex-col gap-2 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Email</span>
-        <input
+      <AuthFormField id="sign-up-email" label="Email">
+        <Input
+          id="sign-up-email"
           name="email"
           type="email"
           required
           autoComplete="email"
           disabled={isBusy}
-          className="h-11 rounded-lg border border-zinc-300 bg-white px-3 text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
         />
-      </label>
+      </AuthFormField>
 
-      <label className="flex flex-col gap-2 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Password</span>
-        <input
+      <AuthFormField id="sign-up-password" label="Password">
+        <Input
+          id="sign-up-password"
           name="password"
           type="password"
           required
           minLength={8}
           autoComplete="new-password"
           disabled={isBusy}
-          className="h-11 rounded-lg border border-zinc-300 bg-white px-3 text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
         />
-      </label>
+      </AuthFormField>
 
-      <label className="flex flex-col gap-2 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">
-          Confirm password
-        </span>
-        <input
+      <AuthFormField id="sign-up-confirm" label="Confirm password">
+        <Input
+          id="sign-up-confirm"
           name="confirmPassword"
           type="password"
           required
           minLength={8}
           autoComplete="new-password"
           disabled={isBusy}
-          className="h-11 rounded-lg border border-zinc-300 bg-white px-3 text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
         />
-      </label>
+      </AuthFormField>
 
-      <button
-        type="submit"
-        disabled={isBusy}
-        className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-6 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
-      >
+      <Button type="submit" disabled={isBusy} fullWidth>
         {status === "creating"
           ? "Creating account…"
           : status === "signing-in"
             ? "Signing you in…"
             : "Create account"}
-      </button>
+      </Button>
 
       <p className="text-center text-sm text-zinc-600 dark:text-zinc-400">
         Already have an account?{" "}

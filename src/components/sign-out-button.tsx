@@ -2,12 +2,20 @@
 
 import { signOut } from "next-auth/react";
 
-export function SignOutButton() {
+interface SignOutButtonProps {
+  className?: string;
+  onClick?: () => void;
+}
+
+export function SignOutButton({ className, onClick }: SignOutButtonProps) {
   return (
     <button
       type="button"
-      onClick={() => signOut({ callbackUrl: "/" })}
-      className="hover:text-zinc-900 dark:hover:text-zinc-50"
+      onClick={() => {
+        onClick?.();
+        signOut({ callbackUrl: "/" });
+      }}
+      className={className ?? "hover:text-zinc-900 dark:hover:text-zinc-50"}
     >
       Sign out
     </button>
