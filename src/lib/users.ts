@@ -1,6 +1,6 @@
-import { ObjectId, type Collection } from "mongodb";
+import { ObjectId, type Collection, type Db } from "mongodb";
 
-import { getDb } from "@/lib/mongodb";
+import { withDb } from "@/lib/mongodb";
 
 export type UserDocument = {
   _id: ObjectId;
@@ -13,8 +13,7 @@ export type UserDocument = {
 const USERS_COLLECTION = "users";
 let indexesEnsured = false;
 
-async function usersCollection(): Promise<Collection<UserDocument>> {
-  const db = await getDb();
+async function usersCollection(db: Db): Promise<Collection<UserDocument>> {
   const collection = db.collection<UserDocument>(USERS_COLLECTION);
 
   if (!indexesEnsured) {
@@ -29,9 +28,10 @@ export async function getUserByEmail(
   email: string,
 ): Promise<UserDocument | null> {
   const normalizedEmail = email.trim().toLowerCase();
-  return usersCollection().then((collection) =>
-    collection.findOne({ email: normalizedEmail }),
-  );
+  return withDb(async (db) => {
+    const collection = await usersCollection(db);
+    return collection.findOne({ email: normalizedEmail });
+  });
 }
 
 export async function createUser(input: {
@@ -43,32 +43,34 @@ export async function createUser(input: {
   const name = input.name?.trim() || null;
   const now = new Date();
 
-  const collection = await usersCollection();
+  return withDb(async (db) => {
+    const collection = await usersCollection(db);
 
-  try {
-    const result = await collection.insertOne({
-      _id: new ObjectId(),
-      email,
-      name,
-      passwordHash: input.passwordHash,
-      createdAt: now,
-    });
+    try {
+      const result = await collection.insertOne({
+        _id: new ObjectId(),
+        email,
+        name,
+        passwordHash: input.passwordHash,
+        createdAt: now,
+      });
 
-    return {
-      _id: result.insertedId,
-      email,
-      name,
-      passwordHash: input.passwordHash,
-      createdAt: now,
-    };
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      (error as { code?: number }).code === 11000
-    ) {
-      throw new Error("An account with this email already exists.");
+      return {
+        _id: result.insertedId,
+        email,
+        name,
+        passwordHash: input.passwordHash,
+        createdAt: now,
+      };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error as { code?: number }).code === 11000
+      ) {
+        throw new Error("An account with this email already exists.");
+      }
+      throw error;
     }
-    throw error;
-  }
+  });
 }

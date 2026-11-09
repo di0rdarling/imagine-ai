@@ -23,9 +23,9 @@ export const STORY_MODES: Record<StoryModeId, StoryModeOption> = {
     accentColor: "from-pink-500 to-purple-600",
     maxTokens: 4096,
     systemPromptGuideline: `[CURRENT ACTIVE MODE: IMMERSIVE MODE]
-- Provide extended, highly descriptive, and emotionally vivid responses.
-- Linger on sensory details: sights, sounds, subtle glances, atmospheric ambiance, and inner tensions.
-- Deliver responses with 3 to 5 multi-sentence paragraphs giving profound narrative depth.`,
+- Deliver responses with 3 to 5 multi-sentence paragraphs giving profound narrative depth.
+- SPEND PARAGRAPHS ON SCENE & ATMOSPHERE: Allocate most of the word count to physical blocking, room acoustics, environmental texture, lighting, weather, tactile details, and unspoken psychological tension.
+- DIALOGUE ECONOMY (CRUCIAL): Do NOT stuff multiple speeches or scattered lines of dialogue across paragraphs. Keep spoken dialogue sparse and impactful (usually at most one single spoken beat or exchange). Let silence and physical presence carry the rest.`,
   },
   story: {
     id: "story",
@@ -37,9 +37,9 @@ export const STORY_MODES: Record<StoryModeId, StoryModeOption> = {
     accentColor: "from-fuchsia-500 to-pink-500",
     maxTokens: 3072,
     systemPromptGuideline: `[CURRENT ACTIVE MODE: STORY MODE]
-- Balance rich scene detail with forward momentum and engaging plot progression.
-- Keep the narrative dynamic, introducing turns, reactions, or questions that urge the next action.
-- Deliver responses with 2 to 3 well-paced paragraphs.`,
+- Deliver responses with 2 to 3 well-paced paragraphs.
+- SPEND PARAGRAPHS ON ACTION & STAGING: Balance forward momentum, physical reactions, environmental shifts, and tension.
+- DIALOGUE ECONOMY (CRUCIAL): Do not monopolize the dialogue. Give at most one cohesive spoken line or exchange, and let the user respond before speaking again.`,
   },
   companion: {
     id: "companion",
@@ -53,7 +53,8 @@ export const STORY_MODES: Record<StoryModeId, StoryModeOption> = {
     systemPromptGuideline: `[CURRENT ACTIVE MODE: COMPANION MODE]
 - Emphasize emotional connection, vulnerability, warmth, and interpersonal chemistry.
 - Focus closely on the relationship between you and the user, tuning into their feelings and tone.
-- Deliver responses with 2 to 3 conversational and emotionally engaged paragraphs.`,
+- Deliver responses with 2 to 3 conversational and emotionally engaged paragraphs.
+- Keep the dialogue natural and focused: one meaningful spoken beat paired with emotional cues, pauses, and expressive body language.`,
   },
   casual: {
     id: "casual",
@@ -67,7 +68,7 @@ export const STORY_MODES: Record<StoryModeId, StoryModeOption> = {
     systemPromptGuideline: `[CURRENT ACTIVE MODE: CASUAL MODE]
 - Keep responses concise, playful, snappy, and quick to read.
 - Avoid overly dense or sprawling narrative essays. Focus on direct, immediate dialogue with punchy expressions.
-- Deliver responses with 1 to 2 short paragraphs (no more than 3-4 sentences total).`,
+- Deliver responses with 1 to 2 short paragraphs (no more than 3-4 sentences total), with a single quick line of dialogue.`,
   },
 };
 

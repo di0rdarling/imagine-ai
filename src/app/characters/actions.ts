@@ -118,7 +118,19 @@ export async function deleteCharacterAction(
     return { success: false, error: "You must be signed in." };
   }
 
-  const deleted = await deleteCharacter(characterId, session.user.id);
+  let deleted = false;
+  try {
+    deleted = await deleteCharacter(characterId, session.user.id);
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Could not delete character. Please try again.",
+    };
+  }
+
   if (!deleted) {
     return {
       success: false,

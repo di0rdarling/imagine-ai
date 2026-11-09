@@ -1,5 +1,5 @@
-import { ObjectId, type Collection } from "mongodb";
-import { getDb } from "@/lib/mongodb";
+import { ObjectId, type Collection, type Db } from "mongodb";
+import { withDb } from "@/lib/mongodb";
 import type { StoryModeId } from "@/lib/story-modes";
 import type { SupportingCharacter } from "@/lib/character-validation";
 import type { StoryMemory } from "@/lib/story-memory";
@@ -26,10 +26,18 @@ export type StoryConversationDocument = {
 const CONVERSATIONS_COLLECTION = "story_conversations";
 let indexesEnsured = false;
 
-export async function conversationsCollection(): Promise<
-  Collection<StoryConversationDocument>
-> {
-  const db = await getDb();
+function parseObjectId(id: string | ObjectId): ObjectId | null {
+  if (id instanceof ObjectId) return id;
+  try {
+    return new ObjectId(id);
+  } catch {
+    return null;
+  }
+}
+
+async function conversationsCollection(
+  db: Db,
+): Promise<Collection<StoryConversationDocument>> {
   const collection = db.collection<StoryConversationDocument>(
     CONVERSATIONS_COLLECTION,
   );
@@ -49,19 +57,17 @@ export async function getConversation(
   characterId: string | ObjectId,
   userId: string | ObjectId,
 ): Promise<StoryConversationDocument | null> {
-  try {
-    const charObjectId =
-      typeof characterId === "string" ? new ObjectId(characterId) : characterId;
-    const userObjectId =
-      typeof userId === "string" ? new ObjectId(userId) : userId;
-    const collection = await conversationsCollection();
-    return await collection.findOne({
+  const charObjectId = parseObjectId(characterId);
+  const userObjectId = parseObjectId(userId);
+  if (!charObjectId || !userObjectId) return null;
+
+  return withDb(async (db) => {
+    const collection = await conversationsCollection(db);
+    return collection.findOne({
       characterId: charObjectId,
       userId: userObjectId,
     });
-  } catch {
-    return null;
-  }
+  });
 }
 
 export async function saveConversationMessages(
@@ -76,35 +82,34 @@ export async function saveConversationMessages(
   supportingCast?: SupportingCharacter[],
   storyMemory?: StoryMemory,
 ): Promise<boolean> {
-  try {
-    const charObjectId =
-      typeof characterId === "string" ? new ObjectId(characterId) : characterId;
-    const userObjectId =
-      typeof userId === "string" ? new ObjectId(userId) : userId;
-    const collection = await conversationsCollection();
-    const now = new Date();
+  const charObjectId = parseObjectId(characterId);
+  const userObjectId = parseObjectId(userId);
+  if (!charObjectId || !userObjectId) return false;
 
-    const storedMessages: StoredChatMessage[] = messages.map((m) => ({
-      id: m.id,
-      sender: m.sender,
-      text: m.text,
-      createdAt: now,
-    }));
+  const now = new Date();
+  const storedMessages: StoredChatMessage[] = messages.map((m) => ({
+    id: m.id,
+    sender: m.sender,
+    text: m.text,
+    createdAt: now,
+  }));
 
-    const updateFields: Record<string, unknown> = {
-      messages: storedMessages,
-      updatedAt: now,
-    };
-    if (mode) {
-      updateFields.mode = mode;
-    }
-    if (supportingCast !== undefined) {
-      updateFields.supportingCast = supportingCast;
-    }
-    if (storyMemory !== undefined) {
-      updateFields.storyMemory = storyMemory;
-    }
+  const updateFields: Record<string, unknown> = {
+    messages: storedMessages,
+    updatedAt: now,
+  };
+  if (mode) {
+    updateFields.mode = mode;
+  }
+  if (supportingCast !== undefined) {
+    updateFields.supportingCast = supportingCast;
+  }
+  if (storyMemory !== undefined) {
+    updateFields.storyMemory = storyMemory;
+  }
 
+  await withDb(async (db) => {
+    const collection = await conversationsCollection(db);
     await collection.updateOne(
       { characterId: charObjectId, userId: userObjectId },
       {
@@ -116,10 +121,8 @@ export async function saveConversationMessages(
       },
       { upsert: true },
     );
-    return true;
-  } catch {
-    return false;
-  }
+  });
+  return true;
 }
 
 export async function updateConversationSupportingCast(
@@ -127,14 +130,13 @@ export async function updateConversationSupportingCast(
   userId: string | ObjectId,
   supportingCast: SupportingCharacter[],
 ): Promise<boolean> {
-  try {
-    const charObjectId =
-      typeof characterId === "string" ? new ObjectId(characterId) : characterId;
-    const userObjectId =
-      typeof userId === "string" ? new ObjectId(userId) : userId;
-    const collection = await conversationsCollection();
-    const now = new Date();
+  const charObjectId = parseObjectId(characterId);
+  const userObjectId = parseObjectId(userId);
+  if (!charObjectId || !userObjectId) return false;
 
+  const now = new Date();
+  await withDb(async (db) => {
+    const collection = await conversationsCollection(db);
     await collection.updateOne(
       { characterId: charObjectId, userId: userObjectId },
       {
@@ -150,10 +152,8 @@ export async function updateConversationSupportingCast(
       },
       { upsert: true },
     );
-    return true;
-  } catch {
-    return false;
-  }
+  });
+  return true;
 }
 
 export async function updateConversationMode(
@@ -161,14 +161,13 @@ export async function updateConversationMode(
   userId: string | ObjectId,
   mode: StoryModeId,
 ): Promise<boolean> {
-  try {
-    const charObjectId =
-      typeof characterId === "string" ? new ObjectId(characterId) : characterId;
-    const userObjectId =
-      typeof userId === "string" ? new ObjectId(userId) : userId;
-    const collection = await conversationsCollection();
-    const now = new Date();
+  const charObjectId = parseObjectId(characterId);
+  const userObjectId = parseObjectId(userId);
+  if (!charObjectId || !userObjectId) return false;
 
+  const now = new Date();
+  await withDb(async (db) => {
+    const collection = await conversationsCollection(db);
     await collection.updateOne(
       { characterId: charObjectId, userId: userObjectId },
       {
@@ -184,24 +183,21 @@ export async function updateConversationMode(
       },
       { upsert: true },
     );
-    return true;
-  } catch {
-    return false;
-  }
+  });
+  return true;
 }
 
 export async function resetConversation(
   characterId: string | ObjectId,
   userId: string | ObjectId,
 ): Promise<boolean> {
-  try {
-    const charObjectId =
-      typeof characterId === "string" ? new ObjectId(characterId) : characterId;
-    const userObjectId =
-      typeof userId === "string" ? new ObjectId(userId) : userId;
-    const collection = await conversationsCollection();
-    const now = new Date();
+  const charObjectId = parseObjectId(characterId);
+  const userObjectId = parseObjectId(userId);
+  if (!charObjectId || !userObjectId) return false;
 
+  const now = new Date();
+  await withDb(async (db) => {
+    const collection = await conversationsCollection(db);
     // Clear story messages and compact memory only.
     // Preserve supportingCast, mode, and other session settings.
     await collection.updateOne(
@@ -216,8 +212,6 @@ export async function resetConversation(
         },
       },
     );
-    return true;
-  } catch {
-    return false;
-  }
+  });
+  return true;
 }

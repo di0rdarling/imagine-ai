@@ -40,6 +40,8 @@ describe("buildSystemInstruction", () => {
     const prompt = buildSystemInstruction(sampleCharacter, "casual");
     expect(prompt).toContain("CURRENT ACTIVE MODE: CASUAL MODE");
     expect(prompt).toContain("Keep responses concise, playful, snappy");
+    expect(prompt).toContain("DIALOGUE ECONOMY & SPENDING LENGTH ON SCENE");
+    expect(prompt).toContain("NEVER MONOPOLIZE CONVERSATIONS");
   });
 
   it("handles characters without optional fields gracefully", () => {
@@ -152,22 +154,22 @@ describe("buildSystemInstruction", () => {
     expect(typeof enhanceUserDraft).toBe("function");
   });
 
-  it("guides spontaneous NPCs and anchor to user perspective in story modes", () => {
-    const storyPrompt = buildSystemInstruction(sampleCharacter, "story");
-    expect(storyPrompt).toContain("PERSPECTIVE ANCHORED TO THE USER");
-    expect(storyPrompt).toContain("SPONTANEOUS NEW CHARACTERS & LIVING WORLD");
-    expect(storyPrompt).toContain("PRESENCE, ABSENCE, & NO FORCED COMMUNICATION");
-    expect(storyPrompt).toContain("DO NOT force them to appear, text, call");
-
+  it("scales spontaneous NPC involvement across storytelling modes", () => {
     const immersivePrompt = buildSystemInstruction(sampleCharacter, "immersive");
-    expect(immersivePrompt).toContain("SPONTANEOUS NEW CHARACTERS & LIVING WORLD");
+    expect(immersivePrompt).toContain("LIVING WORLD & NPC INVOLVEMENT (IMMERSIVE TIER - FULL PRESENCE)");
+    expect(immersivePrompt).toContain("feel like full supporting characters");
 
-    const casualPrompt = buildSystemInstruction(sampleCharacter, "casual");
-    expect(casualPrompt).toContain("EXCLUSIVE FOCUS ON ASTRA VANCE (NO UNINVITED NPCS)");
-    expect(casualPrompt).toContain("Do NOT introduce spontaneous NPCs");
+    const storyPrompt = buildSystemInstruction(sampleCharacter, "story");
+    expect(storyPrompt).toContain("LIVING WORLD & NPC INVOLVEMENT (STORY TIER - DYNAMIC INTERACTION)");
+    expect(storyPrompt).toContain("speak a crisp line or exchange");
 
     const companionPrompt = buildSystemInstruction(sampleCharacter, "companion");
-    expect(companionPrompt).toContain("EXCLUSIVE FOCUS ON ASTRA VANCE (NO UNINVITED NPCS)");
+    expect(companionPrompt).toContain("LIVING WORLD & NPC INVOLVEMENT (COMPANION TIER - BACKGROUND AMBIANCE)");
+    expect(companionPrompt).toContain("minimal or no dialogue");
+
+    const casualPrompt = buildSystemInstruction(sampleCharacter, "casual");
+    expect(casualPrompt).toContain("LIVING WORLD & NPC INVOLVEMENT (CASUAL TIER - BRIEF MENTION ONLY)");
+    expect(casualPrompt).toContain("rarely or never hold spoken conversations");
   });
 
   it("injects previous inner monologue continuity instructions when provided", () => {

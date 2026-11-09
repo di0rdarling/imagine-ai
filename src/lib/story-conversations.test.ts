@@ -1,18 +1,24 @@
 import { ObjectId } from "mongodb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/mongodb", () => ({
+const { getDb } = vi.hoisted(() => ({
   getDb: vi.fn(),
 }));
 
-import { getDb } from "@/lib/mongodb";
+vi.mock("@/lib/mongodb", () => ({
+  getDb,
+  withDb: (operation: (db: unknown) => Promise<unknown>) =>
+    getDb().then((db: unknown) => operation(db)),
+}));
+
+import { getDb as mockedGetDbImport } from "@/lib/mongodb";
 import {
   getConversation,
   resetConversation,
   saveConversationMessages,
 } from "./story-conversations";
 
-const mockedGetDb = vi.mocked(getDb);
+const mockedGetDb = vi.mocked(mockedGetDbImport);
 
 describe("story-conversations repository", () => {
   const findOne = vi.fn();
@@ -93,5 +99,12 @@ describe("story-conversations repository", () => {
     expect(updatePayload.$set).not.toHaveProperty("supportingCast");
     expect(updatePayload.$set).not.toHaveProperty("mode");
     expect(updatePayload.$unset).toEqual({ storyMemory: "" });
+  });
+
+  it("propagates database failures instead of hiding a saved conversation", async () => {
+    findOne.mockRejectedValue(new Error("connection closed"));
+    await expect(
+      getConversation(new ObjectId(), new ObjectId()),
+    ).rejects.toThrow("connection closed");
   });
 });

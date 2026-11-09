@@ -1,6 +1,6 @@
-import { ObjectId, type Collection } from "mongodb";
+import { ObjectId, type Collection, type Db } from "mongodb";
 
-import { getDb } from "@/lib/mongodb";
+import { withDb } from "@/lib/mongodb";
 import type { CharacterInput, SupportingCharacter } from "@/lib/character-validation";
 
 export type { SupportingCharacter };
@@ -28,8 +28,16 @@ export type CharacterDocument = {
 const CHARACTERS_COLLECTION = "characters";
 let indexesEnsured = false;
 
-export async function charactersCollection(): Promise<Collection<CharacterDocument>> {
-  const db = await getDb();
+function parseObjectId(id: string | ObjectId): ObjectId | null {
+  if (id instanceof ObjectId) return id;
+  try {
+    return new ObjectId(id);
+  } catch {
+    return null;
+  }
+}
+
+async function charactersCollection(db: Db): Promise<Collection<CharacterDocument>> {
   const collection = db.collection<CharacterDocument>(CHARACTERS_COLLECTION);
 
   if (!indexesEnsured) {
@@ -47,10 +55,12 @@ export async function createCharacter(
   input: CharacterInput,
   userId: string | ObjectId,
 ): Promise<CharacterDocument> {
-  const collection = await charactersCollection();
-  const now = new Date();
-  const userObjectId = typeof userId === "string" ? new ObjectId(userId) : userId;
+  const userObjectId = parseObjectId(userId);
+  if (!userObjectId) {
+    throw new Error("A valid user id is required to create a character.");
+  }
 
+  const now = new Date();
   const doc: CharacterDocument = {
     _id: new ObjectId(),
     userId: userObjectId,
@@ -71,7 +81,10 @@ export async function createCharacter(
     updatedAt: now,
   };
 
-  const result = await collection.insertOne(doc);
+  const result = await withDb(async (db) => {
+    const collection = await charactersCollection(db);
+    return collection.insertOne(doc);
+  });
 
   return {
     ...doc,
@@ -82,34 +95,36 @@ export async function createCharacter(
 export async function getCharacterById(
   id: string | ObjectId,
 ): Promise<CharacterDocument | null> {
-  try {
-    const objectId = typeof id === "string" ? new ObjectId(id) : id;
-    const collection = await charactersCollection();
-    return await collection.findOne({ _id: objectId });
-  } catch {
-    return null;
-  }
+  const objectId = parseObjectId(id);
+  if (!objectId) return null;
+
+  return withDb(async (db) => {
+    const collection = await charactersCollection(db);
+    return collection.findOne({ _id: objectId });
+  });
 }
 
 export async function getCharactersByUserId(
   userId: string | ObjectId,
 ): Promise<CharacterDocument[]> {
-  try {
-    const objectId = typeof userId === "string" ? new ObjectId(userId) : userId;
-    const collection = await charactersCollection();
-    return await collection.find({ userId: objectId }).sort({ createdAt: -1 }).toArray();
-  } catch {
-    return [];
-  }
+  const objectId = parseObjectId(userId);
+  if (!objectId) return [];
+
+  return withDb(async (db) => {
+    const collection = await charactersCollection(db);
+    return collection.find({ userId: objectId }).sort({ createdAt: -1 }).toArray();
+  });
 }
 
 export async function getPublicCharacters(limit = 20): Promise<CharacterDocument[]> {
-  const collection = await charactersCollection();
-  return await collection
-    .find({ visibility: "public" })
-    .sort({ createdAt: -1 })
-    .limit(limit)
-    .toArray();
+  return withDb(async (db) => {
+    const collection = await charactersCollection(db);
+    return collection
+      .find({ visibility: "public" })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .toArray();
+  });
 }
 
 export async function updateCharacter(
@@ -117,11 +132,12 @@ export async function updateCharacter(
   userId: string | ObjectId,
   input: CharacterInput,
 ): Promise<CharacterDocument | null> {
-  try {
-    const characterObjectId =
-      typeof characterId === "string" ? new ObjectId(characterId) : characterId;
-    const userObjectId = typeof userId === "string" ? new ObjectId(userId) : userId;
-    const collection = await charactersCollection();
+  const characterObjectId = parseObjectId(characterId);
+  const userObjectId = parseObjectId(userId);
+  if (!characterObjectId || !userObjectId) return null;
+
+  return withDb(async (db) => {
+    const collection = await charactersCollection(db);
     const now = new Date();
 
     const result = await collection.updateOne(
@@ -150,27 +166,24 @@ export async function updateCharacter(
       return null;
     }
 
-    return await collection.findOne({ _id: characterObjectId });
-  } catch {
-    return null;
-  }
+    return collection.findOne({ _id: characterObjectId });
+  });
 }
 
 export async function deleteCharacter(
   characterId: string | ObjectId,
   userId: string | ObjectId,
 ): Promise<boolean> {
-  try {
-    const characterObjectId =
-      typeof characterId === "string" ? new ObjectId(characterId) : characterId;
-    const userObjectId = typeof userId === "string" ? new ObjectId(userId) : userId;
-    const collection = await charactersCollection();
+  const characterObjectId = parseObjectId(characterId);
+  const userObjectId = parseObjectId(userId);
+  if (!characterObjectId || !userObjectId) return false;
+
+  return withDb(async (db) => {
+    const collection = await charactersCollection(db);
     const result = await collection.deleteOne({
       _id: characterObjectId,
       userId: userObjectId,
     });
     return result.deletedCount === 1;
-  } catch {
-    return false;
-  }
+  });
 }

@@ -1,14 +1,20 @@
 import { ObjectId } from "mongodb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/mongodb", () => ({
+const { getDb } = vi.hoisted(() => ({
   getDb: vi.fn(),
 }));
 
-import { getDb } from "@/lib/mongodb";
+vi.mock("@/lib/mongodb", () => ({
+  getDb,
+  withDb: (operation: (db: unknown) => Promise<unknown>) =>
+    getDb().then((db: unknown) => operation(db)),
+}));
+
+import { getDb as mockedGetDbImport } from "@/lib/mongodb";
 import { createUser, getUserByEmail } from "@/lib/users";
 
-const mockedGetDb = vi.mocked(getDb);
+const mockedGetDb = vi.mocked(mockedGetDbImport);
 
 describe("users", () => {
   const findOne = vi.fn();

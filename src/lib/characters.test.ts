@@ -1,11 +1,17 @@
 import { ObjectId } from "mongodb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/mongodb", () => ({
+const { getDb } = vi.hoisted(() => ({
   getDb: vi.fn(),
 }));
 
-import { getDb } from "@/lib/mongodb";
+vi.mock("@/lib/mongodb", () => ({
+  getDb,
+  withDb: (operation: (db: unknown) => Promise<unknown>) =>
+    getDb().then((db: unknown) => operation(db)),
+}));
+
+import { getDb as mockedGetDbImport } from "@/lib/mongodb";
 import {
   createCharacter,
   getCharacterById,
@@ -15,7 +21,7 @@ import {
   updateCharacter,
 } from "./characters";
 
-const mockedGetDb = vi.mocked(getDb);
+const mockedGetDb = vi.mocked(mockedGetDbImport);
 
 describe("characters repository", () => {
   const findOne = vi.fn();
@@ -147,5 +153,18 @@ describe("characters repository", () => {
       userId,
     });
     expect(success).toBe(true);
+  });
+
+  it("returns null for an invalid character id without querying", async () => {
+    const result = await getCharacterById("not-a-valid-id");
+    expect(result).toBeNull();
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it("propagates database failures instead of treating them as a missing character", async () => {
+    findOne.mockRejectedValue(new Error("connection closed"));
+    await expect(getCharacterById(new ObjectId().toString())).rejects.toThrow(
+      "connection closed",
+    );
   });
 });
