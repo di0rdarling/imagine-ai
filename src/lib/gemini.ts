@@ -34,6 +34,7 @@ export interface GenerateCharacterResponseOptions {
   supportingCast?: SupportingCharacter[];
   transitions?: CastTransition[];
   storyMemoryRecap?: string | null;
+  previousInnerMonologue?: string | null;
 }
 
 export function buildSystemInstruction(
@@ -42,6 +43,7 @@ export function buildSystemInstruction(
   supportingCastOverride?: SupportingCharacter[],
   transitions?: CastTransition[],
   storyMemoryRecap?: string | null,
+  previousInnerMonologue?: string | null,
 ): string {
   const mode = getStoryMode(modeId);
   const traits = [
@@ -140,6 +142,16 @@ The chat transcript for this turn only includes recent messages. Treat the recap
 ${recap}\n`
     : "";
 
+  const monologue = previousInnerMonologue?.trim();
+  const monologueSection = monologue
+    ? `\n=== CONTINUITY: ${character.name.toUpperCase()}'S UNVOICED INNER THOUGHTS FROM PREVIOUS TURN ===
+At the end of your last turn, your private, internal train of thought was:
+"${monologue}"
+
+MANDATORY CONTINUITY INSTRUCTION:
+Continue seamlessly from this internal emotional state and train of thought. You do not need to repeat these thoughts verbatim aloud, but ${character.name}'s tone, micro-expressions, underlying tension, secret intentions, or decisions in this next turn MUST be informed by and consistent with this internal mindset.\n`
+    : "";
+
   const allowWorldNPCs = mode.id === "story" || mode.id === "immersive";
 
   const npcInstruction = allowWorldNPCs
@@ -164,7 +176,7 @@ ${traits}
 ${character.profile}
 
 ${character.background ? `=== BACKSTORY & SECRET KNOWLEDGE ===\n${character.background}\n` : ""}${castSection}
-${character.greeting ? `=== INITIAL OPENING GREETING ===\n"${character.greeting}"\n` : ""}${memorySection}${transitionSection}
+${character.greeting ? `=== INITIAL OPENING GREETING ===\n"${character.greeting}"\n` : ""}${memorySection}${monologueSection}${transitionSection}
 === STORYTELLING MODE GUIDELINE ===
 ${mode.systemPromptGuideline}${multiCharacterGuidelines}
 
@@ -415,6 +427,78 @@ ${source}`;
   return limitEnhancedLength(source, enhanced, maxCharacters);
 }
 
+export async function generateCharacterInnerMonologue({
+  character,
+  recentTranscript,
+  latestResponse,
+  model = process.env.GEMINI_MODEL || "gemini-3.5-flash",
+}: {
+  character: CharacterPersona;
+  recentTranscript?: string;
+  latestResponse: string;
+  model?: string;
+}): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "GEMINI_API_KEY environment variable is missing. Please set it in your environment or .env.local.",
+    );
+  }
+
+  const traits = [
+    `Name: ${character.name}`,
+    `Role: ${character.occupation}`,
+    `Age: ${character.age}`,
+    `Gender: ${character.gender}`,
+    character.tags && character.tags.length > 0
+      ? `Archetypes: ${character.tags.join(", ")}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const systemInstruction = `You are the private subconscious mind of ${character.name}.
+You are giving the reader an unfiltered, unvoiced peek into what ${character.name} is TRULY thinking and feeling right after their latest words or actions in this scene.
+
+CHARACTER PROFILE:
+${traits}
+${character.profile}
+${character.background ? `SECRET KNOWLEDGE & MOTIVATIONS:\n${character.background}\n` : ""}
+
+CRITICAL GUIDELINES:
+1. RAW FIRST-PERSON STREAM-OF-CONSCIOUSNESS:
+   - Write in 1st person ("I", "my") strictly from ${character.name}'s unvoiced perspective.
+   - Reveal the unsaid subtext: secret doubts, hidden attraction or suspicion, gut instincts, calculated plans, physical tension, or true emotional vulnerability.
+   - Do NOT summarize or explain what happened from an outside point of view. It must feel like an intimate internal monologue, not a character report.
+2. CONCISE & PUNCHY:
+   - Keep the monologue to 2 to 4 vivid, gripping sentences (roughly 40 to 80 words total).
+   - Never write a lengthy dissertation. Keep it immediate to the exact second this turn ended.
+3. NO META-TALK / NO PREAMBLE:
+   - Output ONLY the internal thoughts.
+   - Do NOT wrap the entire response in quotes.
+   - Do NOT say "Here is what I'm thinking:" or mention AI/Gemini.`;
+
+  const userText = `${
+    recentTranscript?.trim()
+      ? `RECENT SCENE EXCERPT:\n${recentTranscript.trim()}\n\n`
+      : ""
+  }${character.name.toUpperCase()}'S LATEST RESPONSE (JUST SPOKEN / PERFORMED):
+${latestResponse.trim()}
+
+WHAT ARE YOUR UNFILTERED, UNVOICED THOUGHTS AT THIS EXACT MOMENT?`;
+
+  const monologue = await generateGeminiText({
+    model,
+    systemInstruction,
+    userText,
+    temperature: 0.7,
+    maxOutputTokens: 256,
+    thinkingBudget: 0,
+  });
+
+  return monologue.trim();
+}
+
 export async function summarizeStoryMemory({
   characterName,
   existingRecap,
@@ -467,6 +551,7 @@ export async function generateCharacterResponse({
   supportingCast,
   transitions,
   storyMemoryRecap,
+  previousInnerMonologue,
 }: GenerateCharacterResponseOptions): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -482,6 +567,7 @@ export async function generateCharacterResponse({
     supportingCast,
     transitions,
     storyMemoryRecap,
+    previousInnerMonologue,
   );
 
   // Convert chat messages to Gemini's contents format

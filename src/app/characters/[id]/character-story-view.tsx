@@ -134,6 +134,9 @@ export function CharacterStoryView({
   const [originalDraft, setOriginalDraft] = useState<string | null>(null);
   const [enhanceError, setEnhanceError] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [innerMonologue, setInnerMonologue] = useState<string | null>(null);
+  const [isGeneratingMonologue, setIsGeneratingMonologue] = useState(false);
+  const [monologueError, setMonologueError] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showStoryGuideModal, setShowStoryGuideModal] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -170,6 +173,9 @@ export function CharacterStoryView({
     setOriginalDraft(null);
     setEnhanceError(null);
     setChatError(null);
+    setInnerMonologue(null);
+    setIsGeneratingMonologue(false);
+    setMonologueError(null);
     setInputMessage("");
     setMessages(createInitialMessages(character.greeting));
     setPendingTransitions([]);
@@ -243,6 +249,41 @@ export function CharacterStoryView({
       setEnhanceError(msg);
     } finally {
       setIsEnhancing(false);
+    }
+  };
+
+  const handleGenerateInnerMonologue = async (latestReplyText: string) => {
+    if (isGeneratingMonologue || isTyping) return;
+    setIsGeneratingMonologue(true);
+    setMonologueError(null);
+
+    try {
+      const res = await fetch("/api/characters/inner-monologue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          characterId: character.id,
+          latestResponse: latestReplyText,
+          recentMessages: messages.slice(-4).map((m) => ({
+            sender: m.sender,
+            text: m.text,
+          })),
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Could not read character thoughts right now.");
+      }
+
+      if (data.monologue && typeof data.monologue === "string") {
+        setInnerMonologue(data.monologue.trim());
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to generate inner monologue.";
+      setMonologueError(msg);
+    } finally {
+      setIsGeneratingMonologue(false);
     }
   };
 
@@ -323,6 +364,12 @@ export function CharacterStoryView({
     const transitionsToSend = [...pendingTransitions];
     setPendingTransitions([]);
 
+    // Capture the monologue from the turn just completed to feed as continuity context
+    const monologueToSend = innerMonologue;
+    // Clear ephemeral monologue for the new upcoming turn
+    setInnerMonologue(null);
+    setMonologueError(null);
+
     try {
       const res = await fetch("/api/characters/chat", {
         method: "POST",
@@ -334,6 +381,7 @@ export function CharacterStoryView({
           mode: currentMode,
           supportingCast,
           transitions: transitionsToSend.length > 0 ? transitionsToSend : undefined,
+          previousInnerMonologue: monologueToSend || undefined,
           messages: [
             {
               id: userMsg.id,
@@ -858,8 +906,16 @@ export function CharacterStoryView({
               )}
 
               {/* Message bubbles */}
-              {messages.map((msg) => {
+              {messages.map((msg, index) => {
                 const isChar = msg.sender === "character";
+                const isLatestCharMessage =
+                  isChar &&
+                  index ===
+                    [...messages]
+                      .map((m, i) => (m.sender === "character" ? i : -1))
+                      .filter((i) => i !== -1)
+                      .pop();
+
                 return (
                   <div
                     key={msg.id}
@@ -888,7 +944,7 @@ export function CharacterStoryView({
                       }`}
                     >
                       {/* Speaker header */}
-                      <div className="mb-2 flex items-center gap-2">
+                      <div className="mb-2 flex items-center justify-between gap-2">
                         <span
                           className={`text-xs font-bold tracking-tight ${
                             isChar ? "text-zinc-900" : "text-zinc-200"
@@ -896,9 +952,96 @@ export function CharacterStoryView({
                         >
                           {isChar ? character.name : displayName}
                         </span>
+
+                        {/* Thought Peek Button on latest character message */}
+                        {isChar && isLatestCharMessage && !isTyping && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (innerMonologue) {
+                                // Toggle off if already visible
+                                setInnerMonologue(null);
+                              } else {
+                                handleGenerateInnerMonologue(msg.text);
+                              }
+                            }}
+                            disabled={isGeneratingMonologue}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-600 hover:text-purple-800 transition disabled:opacity-50"
+                            title="Peek into character's unvoiced internal thoughts"
+                          >
+                            <span>💭</span>
+                            <span className="hidden sm:inline">
+                              {isGeneratingMonologue
+                                ? "Tuning in..."
+                                : innerMonologue
+                                  ? "Hide thoughts"
+                                  : "Peek thoughts"}
+                            </span>
+                          </button>
+                        )}
                       </div>
 
                       <StoryMessageContent text={msg.text} isCharacter={isChar} />
+
+                      {/* Inner Monologue Card attached to latest character message */}
+                      {isChar && isLatestCharMessage && (
+                        <>
+                          {isGeneratingMonologue && (
+                            <div className="mt-3 rounded-2xl border border-purple-200/80 bg-purple-50/50 p-3 text-xs text-purple-800 animate-pulse flex items-center gap-2">
+                              <svg
+                                className="h-4 w-4 animate-spin text-purple-600 shrink-0"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                              >
+                                <circle
+                                  className="opacity-25"
+                                  cx="12"
+                                  cy="12"
+                                  r="10"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                />
+                                <path
+                                  className="opacity-75"
+                                  fill="currentColor"
+                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                />
+                              </svg>
+                              <span>Tuning into {character.name}&apos;s subconscious train of thought…</span>
+                            </div>
+                          )}
+
+                          {innerMonologue && !isGeneratingMonologue && (
+                            <div className="mt-3 rounded-2xl border border-purple-200 bg-gradient-to-br from-purple-50/90 to-indigo-50/70 p-3.5 text-xs text-purple-950 shadow-2xs animate-in fade-in slide-in-from-top-1 duration-200">
+                              <div className="flex items-center justify-between mb-1.5 border-b border-purple-200/60 pb-1">
+                                <span className="font-semibold text-purple-800 flex items-center gap-1.5 uppercase tracking-wider text-[10px]">
+                                  <span>💭</span> {character.name}&apos;s Inner Monologue
+                                </span>
+                                <span className="text-[10px] text-purple-500 font-medium">Unspoken</span>
+                              </div>
+                              <p className="italic leading-relaxed text-purple-900/90">
+                                &ldquo;{innerMonologue}&rdquo;
+                              </p>
+                              <div className="mt-2 flex items-center justify-between text-[10px] text-purple-500 pt-1">
+                                <span>Informs {character.name}&apos;s next response</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setInnerMonologue(null)}
+                                  className="hover:text-purple-800 underline font-medium"
+                                >
+                                  Close
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {monologueError && (
+                            <div className="mt-2 text-xs text-rose-600">
+                              {monologueError}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 );

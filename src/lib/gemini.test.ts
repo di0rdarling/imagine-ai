@@ -169,6 +169,20 @@ describe("buildSystemInstruction", () => {
     const companionPrompt = buildSystemInstruction(sampleCharacter, "companion");
     expect(companionPrompt).toContain("EXCLUSIVE FOCUS ON ASTRA VANCE (NO UNINVITED NPCS)");
   });
+
+  it("injects previous inner monologue continuity instructions when provided", () => {
+    const promptWithMonologue = buildSystemInstruction(
+      sampleCharacter,
+      "story",
+      undefined,
+      undefined,
+      undefined,
+      "I wonder if I can really trust him after the reactor malfunction.",
+    );
+    expect(promptWithMonologue).toContain("CONTINUITY: ASTRA VANCE'S UNVOICED INNER THOUGHTS FROM PREVIOUS TURN");
+    expect(promptWithMonologue).toContain("I wonder if I can really trust him after the reactor malfunction.");
+    expect(promptWithMonologue).toContain("Continue seamlessly from this internal emotional state and train of thought");
+  });
 });
 
 describe("calculateMaxEnhancedLength", () => {

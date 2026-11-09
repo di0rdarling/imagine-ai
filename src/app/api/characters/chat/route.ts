@@ -27,6 +27,7 @@ interface ChatRequestBody {
   mode?: StoryModeId;
   supportingCast?: SupportingCharacter[];
   transitions?: CastTransition[];
+  previousInnerMonologue?: string | null;
   messages: Array<{
     id?: string;
     sender: "character" | "user";
@@ -145,6 +146,7 @@ export async function POST(request: Request) {
       supportingCast: effectiveCast,
       transitions: body.transitions,
       storyMemoryRecap: prepared.recap,
+      previousInnerMonologue: body.previousInnerMonologue,
     });
 
     const persistedMessages = [
