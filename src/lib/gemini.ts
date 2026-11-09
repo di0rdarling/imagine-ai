@@ -351,12 +351,33 @@ export function limitEnhancedLength(
   maxLimit?: number,
 ): string {
   const source = draft.trim();
-  const text = enhanced.trim();
-  const maxCharacters = maxLimit ?? calculateMaxEnhancedLength(source.length);
-  if (!text || text.length <= maxCharacters) return text;
+  let text = enhanced.trim();
 
-  const slice = text.slice(0, maxCharacters);
-  const endings = [". ", "! ", "? ", ".\n", "!\n", "?\n", '."', '!"', '?"'];
+  // Strip wrapping outer quotes if the model wrapped the entire output in quotation marks
+  if (
+    (text.startsWith('"') && text.endsWith('"') && text.length > 2) ||
+    (text.startsWith('“') && text.endsWith('”') && text.length > 2)
+  ) {
+    // Only strip if there are no inner dialogue quotes
+    const innerQuotes = (text.slice(1, -1).match(/["“”]/g) || []).length;
+    if (innerQuotes === 0) {
+      text = text.slice(1, -1).trim();
+    }
+  }
+
+  // Soft limit: if the output is complete and ends with proper punctuation,
+  // allow up to 15% slack so we don't chop off the last sentence unnecessarily.
+  const baseLimit = maxLimit ?? calculateMaxEnhancedLength(source.length);
+  const softSlackLimit = Math.round(baseLimit * 1.15);
+
+  const endsWithPunctuation = /[.!?]["'”’)]*$/.test(text);
+  if (text.length <= baseLimit || (endsWithPunctuation && text.length <= softSlackLimit)) {
+    return balanceQuotesAndPunctuation(text);
+  }
+
+  // If it truly exceeded the upper limit, truncate at the last clean sentence boundary
+  const slice = text.slice(0, baseLimit);
+  const endings = [". ", "! ", "? ", ".\n", "!\n", "?\n", '."', '!"', '?"', '.”', '!”', '?”'];
   let cut = -1;
   let matched = ".";
   for (const ending of endings) {
@@ -368,11 +389,30 @@ export function limitEnhancedLength(
   }
 
   if (cut >= 0) {
-    return slice.slice(0, cut + matched.length).trim();
+    return balanceQuotesAndPunctuation(slice.slice(0, cut + matched.length).trim());
   }
 
   const wordEnd = slice.lastIndexOf(" ");
-  return (wordEnd > 0 ? slice.slice(0, wordEnd) : slice).trim();
+  const trimmedSlice = (wordEnd > 0 ? slice.slice(0, wordEnd) : slice).trim();
+  return balanceQuotesAndPunctuation(trimmedSlice);
+}
+
+function balanceQuotesAndPunctuation(text: string): string {
+  let result = text.trim();
+  if (!result) return result;
+
+  // Ensure trailing punctuation if missing
+  if (!/[.!?]["'”’)]*$/.test(result)) {
+    result += ".";
+  }
+
+  // Balance unclosed double quotes
+  const straightQuotes = (result.match(/"/g) || []).length;
+  if (straightQuotes % 2 !== 0) {
+    result += '"';
+  }
+
+  return result;
 }
 
 export async function enhanceUserDraft({
@@ -425,6 +465,7 @@ GUIDELINES:
 
 6. STORY FORMATTING & CLEAN OUTPUT:
    - Spoken dialogue MUST be enclosed in standard double quotes: "Like this."
+   - COMPLETE EVERY SENTENCE: Always bring your sentences to a clean, complete grammatical close with final punctuation. Never leave a sentence or quote unfinished.
    - Output ONLY the polished in-character prose.
    - Do NOT include any preamble, commentary, greetings, notes, or "Here is the enhanced version:".
    - Do NOT wrap the entire output in quotation marks unless the entire message is spoken dialogue.`;
@@ -445,7 +486,7 @@ ${source}`;
     systemInstruction,
     userText,
     temperature: 0.6,
-    maxOutputTokens: Math.min(512, Math.max(128, Math.ceil(maxCharacters / 2.5))),
+    maxOutputTokens: Math.max(512, Math.ceil(maxCharacters / 2) + 128),
     thinkingBudget: 0,
   });
 

@@ -214,12 +214,23 @@ describe("limitEnhancedLength", () => {
     const draft = "I look at him and say we should leave now, before the road floods.";
     const maxLimit = 130;
     const enhanced =
-      "I look at him and say we should leave now, before the road floods. Then I describe the whole valley, the horses waiting in the dark, and a plan he never agreed to.";
+      "I look at him and say we should leave now, before the road floods. Then I describe the whole valley, the horses waiting in the dark, and a plan he never agreed to that goes on and on.";
     const limited = limitEnhancedLength(draft, enhanced, maxLimit);
 
     expect(limited.length).toBeLessThanOrEqual(maxLimit);
     expect(limited.endsWith(".")).toBe(true);
     expect(limited).not.toContain("whole valley");
+  });
+
+  it("allows soft slack when enhanced text completes cleanly slightly over base limit", () => {
+    const draft = "I look at him.";
+    const maxLimit = 100;
+    // 108 characters, ends with period, within 15% slack (115 chars)
+    const completeCleanProse = "I looked across at him through the dim light of the lantern, waiting for him to notice the map in my hands.";
+    const result = limitEnhancedLength(draft, completeCleanProse, maxLimit);
+
+    expect(result).toBe(completeCleanProse);
+    expect(result.endsWith(".")).toBe(true);
   });
 
   it("cuts an overlong rewrite exceeding calculated limit", () => {
