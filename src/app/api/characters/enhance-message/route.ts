@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     // Format recent scene turns into a readable excerpt
     let recentTranscript = "";
     if (Array.isArray(body.recentMessages) && body.recentMessages.length > 0) {
-      const turns = body.recentMessages.slice(-4);
+      const turns = body.recentMessages.slice(-6);
       recentTranscript = turns
         .map((m) => {
           const speaker = m.sender === "character" ? character.name : "You";
@@ -65,6 +65,7 @@ export async function POST(request: Request) {
     const enhancedText = await enhanceUserDraft({
       draft: body.draft,
       characterName: character.name,
+      characterBackground: character.background || undefined,
       storyMode: body.mode,
       recentTranscript,
     });

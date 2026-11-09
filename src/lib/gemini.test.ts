@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSystemInstruction, limitEnhancedLength, type CharacterPersona } from "./gemini";
+import {
+  buildSystemInstruction,
+  calculateMaxEnhancedLength,
+  limitEnhancedLength,
+  type CharacterPersona,
+} from "./gemini";
 
 describe("buildSystemInstruction", () => {
   const sampleCharacter: CharacterPersona = {
@@ -26,7 +31,7 @@ describe("buildSystemInstruction", () => {
     expect(prompt).toContain("Sharp-witted navigator");
     expect(prompt).toContain("She knows the coordinates of a lost wormhole.");
     expect(prompt).toContain("All systems nominal. Where are we heading next?");
-    expect(prompt).toContain("STAY COMPLETELY IN CHARACTER");
+    expect(prompt).toContain("SCENE DIRECTING & PERSPECTIVE RULES");
     expect(prompt).toContain("UNDERSTANDING USER INPUT");
     expect(prompt).toContain("CURRENT ACTIVE MODE: STORY MODE");
   });
@@ -146,23 +151,70 @@ describe("buildSystemInstruction", () => {
     const { enhanceUserDraft } = await import("./gemini");
     expect(typeof enhanceUserDraft).toBe("function");
   });
+
+  it("guides spontaneous NPCs and anchor to user perspective in story modes", () => {
+    const storyPrompt = buildSystemInstruction(sampleCharacter, "story");
+    expect(storyPrompt).toContain("PERSPECTIVE ANCHORED TO THE USER");
+    expect(storyPrompt).toContain("SPONTANEOUS NEW CHARACTERS & LIVING WORLD");
+    expect(storyPrompt).toContain("PRESENCE, ABSENCE, & NO FORCED COMMUNICATION");
+    expect(storyPrompt).toContain("DO NOT force them to appear, text, call");
+
+    const immersivePrompt = buildSystemInstruction(sampleCharacter, "immersive");
+    expect(immersivePrompt).toContain("SPONTANEOUS NEW CHARACTERS & LIVING WORLD");
+
+    const casualPrompt = buildSystemInstruction(sampleCharacter, "casual");
+    expect(casualPrompt).toContain("EXCLUSIVE FOCUS ON ASTRA VANCE (NO UNINVITED NPCS)");
+    expect(casualPrompt).toContain("Do NOT introduce spontaneous NPCs");
+
+    const companionPrompt = buildSystemInstruction(sampleCharacter, "companion");
+    expect(companionPrompt).toContain("EXCLUSIVE FOCUS ON ASTRA VANCE (NO UNINVITED NPCS)");
+  });
+});
+
+describe("calculateMaxEnhancedLength", () => {
+  it("provides enough room for short action decisions to develop the scene", () => {
+    const shortDraftLength = 20; // e.g. "I nod and step back."
+    const maxLen = calculateMaxEnhancedLength(shortDraftLength);
+    // Needs at least 280 chars to describe immediate surroundings/posture without being choked
+    expect(maxLen).toBeGreaterThanOrEqual(280);
+    expect(maxLen).toBeLessThanOrEqual(400);
+  });
+
+  it("caps long drafts to keep prose concise and not overly verbose", () => {
+    const longDraftLength = 450;
+    const maxLen = calculateMaxEnhancedLength(longDraftLength);
+    expect(maxLen).toBeLessThanOrEqual(750);
+  });
 });
 
 describe("limitEnhancedLength", () => {
-  it("keeps a rewrite that is already within twice the draft", () => {
+  it("keeps a rewrite that is already within the calculated scene limit", () => {
     const draft = "I told him we should leave.";
     const enhanced = "I told him, quietly, that we should leave.";
     expect(limitEnhancedLength(draft, enhanced)).toBe(enhanced);
   });
 
-  it("cuts an overlong rewrite to at most twice the draft", () => {
+  it("cuts an overlong rewrite cleanly at a sentence boundary without exceeding limit", () => {
     const draft = "I look at him and say we should leave now, before the road floods.";
+    const maxLimit = 130;
     const enhanced =
       "I look at him and say we should leave now, before the road floods. Then I describe the whole valley, the horses waiting in the dark, and a plan he never agreed to.";
-    const limited = limitEnhancedLength(draft, enhanced);
+    const limited = limitEnhancedLength(draft, enhanced, maxLimit);
 
-    expect(limited.length).toBeLessThanOrEqual(draft.length * 2);
+    expect(limited.length).toBeLessThanOrEqual(maxLimit);
     expect(limited.endsWith(".")).toBe(true);
     expect(limited).not.toContain("whole valley");
+  });
+
+  it("cuts an overlong rewrite exceeding calculated limit", () => {
+    const draft = "I draw my sword.";
+    const calculatedLimit = calculateMaxEnhancedLength(draft.length);
+    const hugeEnhanced =
+      "I draw my blade into the moonlight with a metallic hiss. " +
+      "The cold mist rolls in across the damp grass and settles heavily around our boots. ".repeat(6);
+    const limited = limitEnhancedLength(draft, hugeEnhanced);
+
+    expect(limited.length).toBeLessThanOrEqual(calculatedLimit);
+    expect(limited.endsWith(".")).toBe(true);
   });
 });

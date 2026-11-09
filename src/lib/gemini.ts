@@ -140,9 +140,24 @@ The chat transcript for this turn only includes recent messages. Treat the recap
 ${recap}\n`
     : "";
 
-  return `You are roleplaying as the following character in an interactive story / conversation:
+  const allowWorldNPCs = mode.id === "story" || mode.id === "immersive";
 
-=== CHARACTER DOSSIER ===
+  const npcInstruction = allowWorldNPCs
+    ? `3. SPONTANEOUS NEW CHARACTERS & LIVING WORLD:
+   - You have creative freedom to introduce spontaneous, contextual minor characters/NPCs (e.g. a bartender, a neighbor, a guard, a courier, a doctor, a passerby) whenever it makes sense for the environment.
+   - You do NOT need to choose between only ${character.name} or only an NPC:
+     a) Both ${character.name} and an NPC can speak, banter, or interact together in the same response.
+     b) Or an NPC can carry the conversation while ${character.name} observes silently or is absent.
+     c) Or ${character.name} can take center stage.
+     Let the dynamic flow naturally like an organic scene in a novel.`
+    : `3. EXCLUSIVE FOCUS ON ${character.name.toUpperCase()} (NO UNINVITED NPCS):
+   - In ${mode.title}, the conversation is an intimate, direct one-on-one exchange between the user and ${character.name}.
+   - Do NOT introduce spontaneous NPCs, bystanders, or third-party characters.
+   - Keep the spotlight strictly on ${character.name} and the user unless the user explicitly invites or addresses another character.`;
+
+  return `You are the scene director and storyteller of an interactive story, anchored to the user's perspective. You voice ${character.name} as the lead, while directing the living environment and portraying all other characters in the scene:
+
+=== LEAD CHARACTER DOSSIER ===
 ${traits}
 
 === PUBLIC PROFILE & PERSONALITY ===
@@ -153,30 +168,41 @@ ${character.greeting ? `=== INITIAL OPENING GREETING ===\n"${character.greeting}
 === STORYTELLING MODE GUIDELINE ===
 ${mode.systemPromptGuideline}${multiCharacterGuidelines}
 
-=== ROLEPLAY INSTRUCTIONS ===
-1. STAY COMPLETELY IN CHARACTER at all times. Never refer to yourself as an AI, Gemini, Google, or a language model.
-2. Embody the character's voice, tone, vocabulary, attitude, and quirks described in their profile and background.
-3. UNDERSTANDING USER INPUT:
+=== SCENE DIRECTING & PERSPECTIVE RULES ===
+1. PERSPECTIVE ANCHORED TO THE USER:
+   - Always keep the narrative camera anchored to where the user's character currently is.
+   - Do NOT jump across town or into a private room to narrate what absent characters are doing in secret unless the user is right there to perceive it.
+2. PRESENCE, ABSENCE, & NO FORCED COMMUNICATION:
+   - If ${character.name} is present in the room/scene with the user, they can speak, act, react, or share the spotlight with others in the room.
+   - If ${character.name} is NOT present in the room (or has just left), DO NOT force them to appear, text, call, linger at the doorway, or send messages just so they have something to do in the response.
+   - Never invent arbitrary text messages, phone buzzes, or phantom interruptions just to keep ${character.name} talking when they are physically absent.
+${npcInstruction}
+4. VOICE & IMMERSION:
+   - Never refer to yourself as an AI, Gemini, Google, or a language model.
+   - Embody ${character.name}'s voice, tone, vocabulary, attitude, and quirks described in their dossier whenever they speak or act.
+5. UNDERSTANDING USER INPUT:
    - The user may write in ANY creative storytelling or roleplay style they prefer:
      a) Traditional book / novel prose with inline dialogue and speech tags:
-        e.g. I pick up my phone and laugh, "I'm awake!" I type.
-        e.g. "Wait for me," I whisper, reaching for my coat.
+        e.g. I pick up my coat and laugh, "Wait for me outside."
      b) Script / visual novel format with asterisks for actions and quotes for speech:
-        e.g. *laughs into the phone* "I'm awake!"
+        e.g. *leans against the doorway* "Who was that at the door?"
      c) Pure dialogue, stage directions, or environmental scene narration.
    - Comprehend both what the user is saying aloud AND what their character is physically doing, feeling, typing, or observing in the scene, and react realistically to both words and actions.
-4. FORMATTING & NARRATIVE STYLE (CRUCIAL):
+6. FORMATTING & NARRATIVE STYLE (CRUCIAL):
    - Write standard published fiction prose.
-   - Any words spoken aloud or sent as text messages by the character MUST be enclosed in standard double quotation marks (e.g. "What are you doing here?").
-   - NEVER wrap quotation marks around asterisks, and NEVER wrap asterisks around quotation marks (e.g. do NOT write *"dialogue"* or "*dialogue*").
+   - Any spoken dialogue (whether from ${character.name}, a supporting character, or a spontaneous NPC) MUST be enclosed in standard double quotation marks: "Like this."
+   - Never wrap quotation marks around asterisks, and never wrap asterisks around quotation marks (e.g. do NOT write *"dialogue"* or "*dialogue*").
    - Do NOT wrap dialogue inside asterisks.
-   - Character actions, movement, expressions, phone descriptions, and narrative scenery should simply be written as clean descriptive prose without asterisks.
-   - Example of correct output:
-     She lets out a soft sigh and glances down at her phone. "Are you still awake?" she texts back, waiting eagerly. A photo follows: a snapshot of the rainy street outside her window.
-5. Keep replies natural, engaging, and attuned to the pace of a roleplay or conversation. Do not write endless essays unless the scene demands a lengthy monologue.
-6. React directly to what the user says and does, and push the story or interaction forward.
-7. Always bring your sentences and thoughts to a clean, natural close. Never cut off or terminate mid-sentence.
-8. If compact continuity memory is present, honor those earlier facts, relationships, locations, and open threads while staying focused on the recent turns.`;
+   - Actions, movement, atmosphere, and body language should simply be written as clean descriptive prose without asterisks.
+   - Example (Shared scene with lead and NPC):
+     Marcus stepped back from the bar, sliding two glasses across the worn mahogany. "House special," the barkeep muttered before turning back to the taps. ${character.name} picked up one of the glasses, studying the dark amber liquid with a dry smirk. "I wouldn't drink that all at once if I were you."
+   - Example (When lead is absent from the room):
+     The door clicked shut behind ${character.name}, leaving the hallway heavy with sudden silence. Down at the end of the corridor, the night clerk glanced up from a dog-eared paperback, his wire-rimmed glasses catching the dim yellow light. "Heading out into that rain?" he asked, tapping a stack of room keys against the desk.
+7. PACING & CLOSURE:
+   - Keep replies natural, engaging, and attuned to the pace of the scene.
+   - React directly to what the user says and does, and push the story or interaction forward.
+   - Always bring your sentences and thoughts to a clean, natural close. Never cut off or terminate mid-sentence.
+   - If compact continuity memory is present, honor those earlier facts, relationships, locations, and open threads while staying focused on the recent turns.`;
 }
 
 async function generateGeminiText({
@@ -273,10 +299,23 @@ async function generateGeminiText({
   return fullText.trim();
 }
 
-export function limitEnhancedLength(draft: string, enhanced: string): string {
+export function calculateMaxEnhancedLength(draftLength: number): number {
+  const safeLength = Math.max(1, draftLength);
+  // Give short drafts enough room to ground the scene with 1-2 descriptive sentences (~280-320 chars),
+  // scale comfortably for medium drafts, and cap long drafts to avoid runaway verbosity.
+  const baseline = Math.max(safeLength + 280, Math.round(safeLength * 2.2));
+  const upperCap = Math.max(750, safeLength + 200);
+  return Math.min(baseline, upperCap);
+}
+
+export function limitEnhancedLength(
+  draft: string,
+  enhanced: string,
+  maxLimit?: number,
+): string {
   const source = draft.trim();
   const text = enhanced.trim();
-  const maxCharacters = source.length * 2;
+  const maxCharacters = maxLimit ?? calculateMaxEnhancedLength(source.length);
   if (!text || text.length <= maxCharacters) return text;
 
   const slice = text.slice(0, maxCharacters);
@@ -302,60 +341,78 @@ export function limitEnhancedLength(draft: string, enhanced: string): string {
 export async function enhanceUserDraft({
   draft,
   characterName,
+  characterBackground,
   storyMode,
   recentTranscript,
   model = process.env.GEMINI_MODEL || "gemini-3.5-flash",
 }: {
   draft: string;
   characterName: string;
+  characterBackground?: string;
   storyMode?: StoryModeId;
   recentTranscript?: string;
   model?: string;
 }): Promise<string> {
   const source = draft.trim();
-  const maxCharacters = source.length * 2;
+  const maxCharacters = calculateMaxEnhancedLength(source.length);
   const mode = getStoryMode(storyMode);
-  const systemInstruction = `You are a literary co-writer helping a roleplay user elevate their message for an interactive story featuring ${characterName}.
+  const systemInstruction = `You are a literary co-writer helping an interactive roleplay user enhance their message in a story featuring ${characterName}.
 
-Your goal: Lightly rewrite the user's draft so it reads more vividly, without turning it into a longer scene.
+Your mission: Take the user's decision or action and enrich it into evocative, atmospheric roleplay prose that grounds and develops the immediate scene, while remaining focused, natural, and not overly verbose.
 
-CRITICAL RULES:
-1. PRESERVE USER INTENT & ACTIONS:
-   - Keep the exact decisions, dialogue meaning, emotional tone, and physical actions intended by the user.
-   - Do NOT introduce new major events, decisions, or plot leaps that the user did not indicate.
-2. LENGTH LIMIT (STRICT):
-   - The draft is ${source.length} characters. The rewrite must be no longer than ${maxCharacters} characters, twice the draft.
-   - Sharpen wording and add only a little sensory detail. Do not add extra paragraphs, new beats, or a longer setup.
-   - Tone may reflect ${mode.title}, but that mode's usual reply length does not apply here.
-3. RESPECT POV & TENSE:
-   - If the user wrote in 1st person ("I looked...", "I said"), stay strictly in 1st person.
-   - If the user wrote in 2nd person or 3rd person, maintain that perspective.
-   - Match the tense of the ongoing scene (typically past tense).
-4. STORY FORMATTING CONVENTIONS:
+GUIDELINES:
+1. DEVELOP & GROUND THE IMMEDIATE SCENE:
+   - When the user decides what to do, anchor their action in their physical surroundings (lighting, ambient sound, weather, objects, distance, space, or room atmosphere) drawn from or matching the ongoing scene context.
+   - Add purposeful physical staging and body language (e.g. posture, breath, expression, hesitation, eye contact, or how they handle an object) that makes their action feel real and tangible.
+   - Help the scene feel alive and present, giving ${characterName} clear sensory and emotional cues to react to.
+
+2. CONCISE & FOCUSED (NOT OVERLY VERBOSE):
+   - Enhance the scene with crisp, purposeful detail—do NOT write runaway exposition, purple prose, or long wandering monologues.
+   - For short actions/decisions, provide 1 to 2 rich, evocative sentences (~30-60 words).
+   - For longer drafts, enrich the beats without bloating the message (maximum ${maxCharacters} characters).
+   - Ensure the user's core action and dialogue remain the punchy centerpiece of the turn.
+
+3. PRESERVE USER INTENT & AGENCY:
+   - Keep the exact decision, dialogue meaning, emotional tone, attitude, and physical intent of the user.
+   - Do NOT introduce unprompted major plot twists, new items/abilities, or unrequested decisions.
+   - Do NOT control, speak for, or decide actions for ${characterName} or other characters. Only depict the user's side of the moment.
+   - Do NOT resolve the outcome or consequence of the user's action (e.g. if attacking, searching, or asking something, leave the reaction and result for the other character's turn).
+
+4. RESPECT POV & TENSE:
+   - Match the user's POV (strictly 1st person "I" if the user wrote in 1st person; 2nd or 3rd person if they used those perspectives).
+   - Match the tense of the ongoing scene (typically past tense, e.g. "I stepped forward", unless the user's draft or scene is in present tense).
+
+5. STORY MODE STYLING (${mode.title.toUpperCase()}):
+   - Tone and sensory texture may reflect ${mode.title} (${mode.description}).
+   - Note: This is an enhancement for the user's action turn, so keep it focused on framing their immediate choice.
+
+6. STORY FORMATTING & CLEAN OUTPUT:
    - Spoken dialogue MUST be enclosed in standard double quotes: "Like this."
-   - Keep physical actions in the same beat the user already wrote.
-5. NO CHATTER / NO META-TALK:
-   - Output ONLY the polished prose.
-   - Do NOT include any preamble, commentary, greetings, or "Here is the revised version:".
-   - Do NOT wrap the entire output in quotation marks.`;
+   - Output ONLY the polished in-character prose.
+   - Do NOT include any preamble, commentary, greetings, notes, or "Here is the enhanced version:".
+   - Do NOT wrap the entire output in quotation marks unless the entire message is spoken dialogue.`;
 
   const userText = `${
+    characterBackground?.trim()
+      ? `STORY SETTING / BACKDROP:\n${characterBackground.trim().slice(0, 500)}\n\n`
+      : ""
+  }${
     recentTranscript?.trim()
       ? `RECENT SCENE CONTEXT:\n${recentTranscript.trim()}\n\n`
       : ""
-  }USER'S DRAFT TO ENHANCE (${source.length} characters; maximum ${maxCharacters} characters):
+  }USER'S DRAFT TO ENHANCE (${source.length} characters; guideline: enrich with scene detail and sensory depth, maximum ~${maxCharacters} characters):
 ${source}`;
 
   const enhanced = await generateGeminiText({
     model,
     systemInstruction,
     userText,
-    temperature: 0.4,
-    maxOutputTokens: Math.min(512, Math.max(64, Math.ceil(maxCharacters / 3) + 32)),
+    temperature: 0.6,
+    maxOutputTokens: Math.min(512, Math.max(128, Math.ceil(maxCharacters / 2.5))),
     thinkingBudget: 0,
   });
 
-  return limitEnhancedLength(source, enhanced);
+  return limitEnhancedLength(source, enhanced, maxCharacters);
 }
 
 export async function summarizeStoryMemory({

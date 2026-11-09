@@ -222,7 +222,7 @@ export function CharacterStoryView({
           characterId: character.id,
           draft: raw,
           mode: currentMode,
-          recentMessages: messages.slice(-4).map((m) => ({
+          recentMessages: messages.slice(-6).map((m) => ({
             sender: m.sender,
             text: m.text,
           })),
@@ -945,7 +945,7 @@ export function CharacterStoryView({
                 <div className="flex items-center justify-between rounded-xl bg-purple-50/80 border border-purple-200/70 px-3 py-1.5 text-xs text-purple-900 animate-in fade-in slide-in-from-bottom-1 duration-200">
                   <div className="flex items-center gap-1.5 truncate">
                     <span className="text-purple-600">✨</span>
-                    <span className="font-medium truncate">Prose enhanced for the scene!</span>
+                    <span className="font-medium truncate">Scene & prose enhanced!</span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 ml-2">
                     <button
@@ -1021,7 +1021,7 @@ export function CharacterStoryView({
                   onClick={handleEnhanceDraft}
                   disabled={!inputMessage.trim() || isEnhancing || isTyping}
                   className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-2xl border border-purple-200 bg-purple-50/70 px-3 text-purple-700 hover:bg-purple-100 hover:border-purple-300 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-purple-50/70"
-                  title="Enhance prose with AI (adds literary detail & vividness without changing your intent)"
+                  title="Enhance with AI (develops the scene with sensory detail while keeping your action)"
                   aria-label="Enhance message with AI"
                 >
                   {isEnhancing ? (
