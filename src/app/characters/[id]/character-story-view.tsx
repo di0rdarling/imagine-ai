@@ -130,6 +130,9 @@ export function CharacterStoryView({
   });
   const [inputMessage, setInputMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [originalDraft, setOriginalDraft] = useState<string | null>(null);
+  const [enhanceError, setEnhanceError] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showStoryGuideModal, setShowStoryGuideModal] = useState(false);
@@ -163,6 +166,9 @@ export function CharacterStoryView({
       abortControllerRef.current = null;
     }
     setIsTyping(false);
+    setIsEnhancing(false);
+    setOriginalDraft(null);
+    setEnhanceError(null);
     setChatError(null);
     setInputMessage("");
     setMessages(createInitialMessages(character.greeting));
@@ -196,6 +202,47 @@ export function CharacterStoryView({
       });
     } catch {
       // Non-blocking background sync
+    }
+  };
+
+  const handleEnhanceDraft = async () => {
+    const raw = inputMessage.trim();
+    if (!raw || isEnhancing || isTyping) return;
+
+    setIsEnhancing(true);
+    setEnhanceError(null);
+
+    const previousDraft = inputMessage;
+
+    try {
+      const res = await fetch("/api/characters/enhance-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          characterId: character.id,
+          draft: raw,
+          mode: currentMode,
+          recentMessages: messages.slice(-4).map((m) => ({
+            sender: m.sender,
+            text: m.text,
+          })),
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to enhance your draft.");
+      }
+
+      if (data.enhancedText && typeof data.enhancedText === "string") {
+        setOriginalDraft(previousDraft);
+        setInputMessage(data.enhancedText.trim());
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to enhance draft right now.";
+      setEnhanceError(msg);
+    } finally {
+      setIsEnhancing(false);
     }
   };
 
@@ -259,6 +306,8 @@ export function CharacterStoryView({
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
     setInputMessage("");
+    setOriginalDraft(null);
+    setEnhanceError(null);
     if (composerRef.current) {
       composerRef.current.style.height = "auto";
     }
@@ -891,6 +940,56 @@ export function CharacterStoryView({
           {/* Sticky Message input pinned at bottom with iOS home bar safe area */}
           <div className="shrink-0 border-t border-zinc-200/80 bg-white px-3 pt-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-3.5">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-1.5 sm:gap-2">
+              {/* Undo banner when user draft was enhanced */}
+              {originalDraft !== null && (
+                <div className="flex items-center justify-between rounded-xl bg-purple-50/80 border border-purple-200/70 px-3 py-1.5 text-xs text-purple-900 animate-in fade-in slide-in-from-bottom-1 duration-200">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="text-purple-600">✨</span>
+                    <span className="font-medium truncate">Prose enhanced for the scene!</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInputMessage(originalDraft);
+                        setOriginalDraft(null);
+                      }}
+                      className="font-semibold text-purple-700 underline hover:text-purple-900 transition text-[11px]"
+                    >
+                      Revert to original
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOriginalDraft(null)}
+                      className="text-purple-400 hover:text-purple-700 p-0.5 rounded transition"
+                      aria-label="Dismiss notice"
+                    >
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                        <path
+                          fillRule="evenodd"
+                          d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Enhance error banner */}
+              {enhanceError && (
+                <div className="flex items-start justify-between gap-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-1.5 text-xs text-amber-800">
+                  <span className="min-w-0 flex-1">{enhanceError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setEnhanceError(null)}
+                    className="text-amber-500 hover:text-amber-800 shrink-0 ml-2 text-[11px] font-semibold"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
               <form onSubmit={handleSendMessage} className="flex w-full items-end gap-2">
                 <Textarea
                   ref={composerRef}
@@ -899,19 +998,73 @@ export function CharacterStoryView({
                   className="flex-1 min-h-[44px] max-h-36 py-2.5 px-3.5 sm:py-3 sm:px-4 text-base md:text-sm rounded-2xl overflow-y-auto leading-normal"
                   placeholder={`Talk to ${character.name}...`}
                   value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
+                  onChange={(e) => {
+                    setInputMessage(e.target.value);
+                    if (originalDraft !== null) {
+                      setOriginalDraft(null);
+                    }
+                  }}
                   onKeyDown={(e) => {
                     if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
                       return;
                     }
                     e.preventDefault();
-                    if (!inputMessage.trim() || isTyping) return;
+                    if (!inputMessage.trim() || isTyping || isEnhancing) return;
                     e.currentTarget.form?.requestSubmit();
                   }}
-                  disabled={isTyping}
+                  disabled={isTyping || isEnhancing}
                   autoFocus
                   aria-label={`Message ${character.name}`}
                 />
+                <button
+                  type="button"
+                  onClick={handleEnhanceDraft}
+                  disabled={!inputMessage.trim() || isEnhancing || isTyping}
+                  className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-2xl border border-purple-200 bg-purple-50/70 px-3 text-purple-700 hover:bg-purple-100 hover:border-purple-300 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-purple-50/70"
+                  title="Enhance prose with AI (adds literary detail & vividness without changing your intent)"
+                  aria-label="Enhance message with AI"
+                >
+                  {isEnhancing ? (
+                    <svg
+                      className="h-4 w-4 animate-spin text-purple-600"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                  ) : (
+                    <svg
+                      className="h-4 w-4 text-purple-600"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                      <path d="M5 3v4" />
+                      <path d="M19 17v4" />
+                      <path d="M3 5h4" />
+                      <path d="M17 19h4" />
+                    </svg>
+                  )}
+                  <span className="hidden md:inline text-xs font-semibold">
+                    {isEnhancing ? "Polishing..." : "Enhance"}
+                  </span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setShowStoryGuideModal(true)}
@@ -926,7 +1079,7 @@ export function CharacterStoryView({
                 </button>
                 <button
                   type="submit"
-                  disabled={!inputMessage.trim() || isTyping}
+                  disabled={!inputMessage.trim() || isTyping || isEnhancing}
                   aria-label="Send message"
                   className="inline-flex h-11 w-11 sm:w-auto sm:px-5 shrink-0 items-center justify-center rounded-2xl bg-zinc-900 text-white shadow-xs transition hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed"
                 >

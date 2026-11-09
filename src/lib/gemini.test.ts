@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSystemInstruction, type CharacterPersona } from "./gemini";
+import { buildSystemInstruction, limitEnhancedLength, type CharacterPersona } from "./gemini";
 
 describe("buildSystemInstruction", () => {
   const sampleCharacter: CharacterPersona = {
@@ -140,5 +140,29 @@ describe("buildSystemInstruction", () => {
     expect(prompt).toContain("They escaped the station and promised to meet at dawn.");
     expect(prompt).toContain("chat transcript for this turn only includes recent messages");
     expect(prompt).toContain("If compact continuity memory is present");
+  });
+
+  it("exports enhanceUserDraft function", async () => {
+    const { enhanceUserDraft } = await import("./gemini");
+    expect(typeof enhanceUserDraft).toBe("function");
+  });
+});
+
+describe("limitEnhancedLength", () => {
+  it("keeps a rewrite that is already within twice the draft", () => {
+    const draft = "I told him we should leave.";
+    const enhanced = "I told him, quietly, that we should leave.";
+    expect(limitEnhancedLength(draft, enhanced)).toBe(enhanced);
+  });
+
+  it("cuts an overlong rewrite to at most twice the draft", () => {
+    const draft = "I look at him and say we should leave now, before the road floods.";
+    const enhanced =
+      "I look at him and say we should leave now, before the road floods. Then I describe the whole valley, the horses waiting in the dark, and a plan he never agreed to.";
+    const limited = limitEnhancedLength(draft, enhanced);
+
+    expect(limited.length).toBeLessThanOrEqual(draft.length * 2);
+    expect(limited.endsWith(".")).toBe(true);
+    expect(limited).not.toContain("whole valley");
   });
 });

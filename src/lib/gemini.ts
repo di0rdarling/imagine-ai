@@ -273,6 +273,91 @@ async function generateGeminiText({
   return fullText.trim();
 }
 
+export function limitEnhancedLength(draft: string, enhanced: string): string {
+  const source = draft.trim();
+  const text = enhanced.trim();
+  const maxCharacters = source.length * 2;
+  if (!text || text.length <= maxCharacters) return text;
+
+  const slice = text.slice(0, maxCharacters);
+  const endings = [". ", "! ", "? ", ".\n", "!\n", "?\n", '."', '!"', '?"'];
+  let cut = -1;
+  let matched = ".";
+  for (const ending of endings) {
+    const index = slice.lastIndexOf(ending);
+    if (index > cut) {
+      cut = index;
+      matched = ending.trimEnd();
+    }
+  }
+
+  if (cut >= 0) {
+    return slice.slice(0, cut + matched.length).trim();
+  }
+
+  const wordEnd = slice.lastIndexOf(" ");
+  return (wordEnd > 0 ? slice.slice(0, wordEnd) : slice).trim();
+}
+
+export async function enhanceUserDraft({
+  draft,
+  characterName,
+  storyMode,
+  recentTranscript,
+  model = process.env.GEMINI_MODEL || "gemini-3.5-flash",
+}: {
+  draft: string;
+  characterName: string;
+  storyMode?: StoryModeId;
+  recentTranscript?: string;
+  model?: string;
+}): Promise<string> {
+  const source = draft.trim();
+  const maxCharacters = source.length * 2;
+  const mode = getStoryMode(storyMode);
+  const systemInstruction = `You are a literary co-writer helping a roleplay user elevate their message for an interactive story featuring ${characterName}.
+
+Your goal: Lightly rewrite the user's draft so it reads more vividly, without turning it into a longer scene.
+
+CRITICAL RULES:
+1. PRESERVE USER INTENT & ACTIONS:
+   - Keep the exact decisions, dialogue meaning, emotional tone, and physical actions intended by the user.
+   - Do NOT introduce new major events, decisions, or plot leaps that the user did not indicate.
+2. LENGTH LIMIT (STRICT):
+   - The draft is ${source.length} characters. The rewrite must be no longer than ${maxCharacters} characters, twice the draft.
+   - Sharpen wording and add only a little sensory detail. Do not add extra paragraphs, new beats, or a longer setup.
+   - Tone may reflect ${mode.title}, but that mode's usual reply length does not apply here.
+3. RESPECT POV & TENSE:
+   - If the user wrote in 1st person ("I looked...", "I said"), stay strictly in 1st person.
+   - If the user wrote in 2nd person or 3rd person, maintain that perspective.
+   - Match the tense of the ongoing scene (typically past tense).
+4. STORY FORMATTING CONVENTIONS:
+   - Spoken dialogue MUST be enclosed in standard double quotes: "Like this."
+   - Keep physical actions in the same beat the user already wrote.
+5. NO CHATTER / NO META-TALK:
+   - Output ONLY the polished prose.
+   - Do NOT include any preamble, commentary, greetings, or "Here is the revised version:".
+   - Do NOT wrap the entire output in quotation marks.`;
+
+  const userText = `${
+    recentTranscript?.trim()
+      ? `RECENT SCENE CONTEXT:\n${recentTranscript.trim()}\n\n`
+      : ""
+  }USER'S DRAFT TO ENHANCE (${source.length} characters; maximum ${maxCharacters} characters):
+${source}`;
+
+  const enhanced = await generateGeminiText({
+    model,
+    systemInstruction,
+    userText,
+    temperature: 0.4,
+    maxOutputTokens: Math.min(512, Math.max(64, Math.ceil(maxCharacters / 3) + 32)),
+    thinkingBudget: 0,
+  });
+
+  return limitEnhancedLength(source, enhanced);
+}
+
 export async function summarizeStoryMemory({
   characterName,
   existingRecap,
